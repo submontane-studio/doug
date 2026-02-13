@@ -1,5 +1,7 @@
 // background.js - AI API によるOCR＋翻訳処理
 
+import * as webllm from '@mlc-ai/web-llm';
+
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日（ミリ秒）
 const CACHE_VERSION = '1.0';
 
@@ -29,11 +31,8 @@ class WebLLMManager {
     this.initProgress = 0;
 
     try {
-      // Dynamically import WebLLM library
-      const { CreateMLCEngine } = await import('https://esm.sh/@mlc-ai/web-llm@0.2.66');
-
       // Initialize model
-      this.engine = await CreateMLCEngine('Phi-3.5-vision-instruct-q4f16_1-MLC', {
+      this.engine = await webllm.CreateMLCEngine('Phi-3.5-vision-instruct-q4f16_1-MLC', {
         initProgressCallback: (progress) => {
           this.initProgress = Math.round(progress.progress * 100);
           console.log(`WebLLM初期化: ${this.initProgress}%`);
