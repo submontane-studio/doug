@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marvel Unlimited Translator 設定</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Marvel Unlimited Translator</h1>
+
+    <div class="section">
+      <h2>使用モデル</h2>
+      <div class="model-info">
+        <div class="model-name">Phi-3.5-Vision (2.4GB)</div>
+        <div class="model-desc">ローカル実行・完全無料</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <label for="targetLang">翻訳先言語:</label>
+      <select id="targetLang">
+        <option value="ja">日本語 (Japanese)</option>
+        <option value="ko">韓国語 (Korean)</option>
+        <option value="zh-CN">簡体字中国語 (Simplified Chinese)</option>
+        <option value="zh-TW">繁体字中国語 (Traditional Chinese)</option>
+        <option value="es">スペイン語 (Spanish)</option>
+        <option value="fr">フランス語 (French)</option>
+        <option value="de">ドイツ語 (German)</option>
+        <option value="pt">ポルトガル語 (Portuguese)</option>
+      </select>
+    </div>
+
+    <div class="actions">
+      <button id="saveBtn" class="btn-primary">保存</button>
+      <button id="clearCacheBtn" class="btn-secondary">キャッシュをクリア</button>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
