@@ -11,10 +11,13 @@
     <h1>Marvel Unlimited Translator</h1>
 
     <div class="section">
-      <h2>使用モデル</h2>
-      <div class="model-info">
-        <div class="model-name">Phi-3.5-Vision (2.4GB)</div>
-        <div class="model-desc">ローカル実行・完全無料</div>
+      <label for="geminiApiKey">Gemini APIキー:</label>
+      <div class="field-with-toggle">
+        <input type="password" id="geminiApiKey" placeholder="AIza...">
+        <button id="toggleKeyBtn" class="btn-icon" title="表示/非表示">👁</button>
+      </div>
+      <div class="field-hint">
+        <a href="https://aistudio.google.com/apikey" target="_blank">APIキーを取得</a>（無料枠あり）
       </div>
     </div>
 
@@ -30,6 +33,13 @@
         <option value="de">ドイツ語 (German)</option>
         <option value="pt">ポルトガル語 (Portuguese)</option>
       </select>
+    </div>
+
+    <div class="section">
+      <div class="model-info">
+        <div class="model-name">OCR: Tesseract.js（ローカル）</div>
+        <div class="model-desc">翻訳: Gemini API（テキストのみ送信）</div>
+      </div>
     </div>
 
     <div class="actions">
