@@ -1,0 +1,216 @@
+/* ============================================================
+   Marvel Unlimited Translator - コンテンツスタイル
+   ============================================================ */
+
+/* ツールバー */
+#mut-toolbar {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 99999;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: #1a1a2e;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  cursor: move;
+  user-select: none;
+}
+
+.mut-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.mut-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.mut-btn-primary {
+  background: #e23636;
+  color: #fff;
+  font-weight: 600;
+}
+.mut-btn-primary:hover {
+  background: #c62828;
+}
+
+.mut-btn.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+.mut-btn.loading::after {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: mut-spin 0.6s linear infinite;
+}
+
+@keyframes mut-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 翻訳オーバーレイ */
+.mut-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: default;
+  transition: opacity 0.2s;
+  overflow: hidden;
+}
+
+.mut-overlay-text {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3px 5px;
+  font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  /* フォントサイズはJSで自動調整、初期値 */
+  font-size: 14px;
+}
+
+/* セリフ（吹き出し） */
+.mut-type-speech .mut-overlay-text {
+  background: rgba(255, 255, 255, 1);
+  color: #111;
+  border-radius: 4px;
+}
+
+/* 思考 */
+.mut-type-thought .mut-overlay-text {
+  background: rgba(240, 240, 255, 1);
+  color: #333;
+  border-radius: 8px;
+  font-style: italic;
+}
+
+/* キャプション/ナレーション */
+.mut-type-caption .mut-overlay-text,
+.mut-type-narration .mut-overlay-text {
+  background: rgba(255, 248, 200, 1);
+  color: #222;
+  border-radius: 2px;
+}
+
+/* 効果音 */
+.mut-type-sfx .mut-overlay-text {
+  background: transparent;
+  color: #e23636;
+  font-size: clamp(12px, 2vw, 28px);
+  font-weight: 900;
+  text-shadow:
+    1px 1px 0 #fff,
+    -1px -1px 0 #fff,
+    1px -1px 0 #fff,
+    -1px 1px 0 #fff;
+}
+
+/* ホバー時の原文表示 */
+.mut-overlay-original {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 400;
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 1;
+  pointer-events: none;
+}
+.mut-overlay:hover .mut-overlay-original {
+  display: block;
+}
+
+/* 通知トースト */
+#mut-notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-80px);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  z-index: 999999;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#mut-notification.mut-notif-show {
+  transform: translateX(-50%) translateY(0);
+}
+.mut-notif-info {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+.mut-notif-success {
+  background: #1b5e20;
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(27, 94, 32, 0.4);
+}
+.mut-notif-warn {
+  background: #e65100;
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(230, 81, 0, 0.4);
+}
+.mut-notif-error {
+  background: #b71c1c;
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(183, 28, 28, 0.4);
+}
+
+/* 進捗バー通知 */
+.mut-notif-progress {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  min-width: 300px;
+}
+.mut-notif-progress::after {
+  content: '';
+  display: block;
+  margin-top: 8px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
