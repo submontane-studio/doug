@@ -1,0 +1,131 @@
+/* popup.css */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 300px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+.container {
+  padding: 20px;
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e23636;
+  margin-bottom: 16px;
+  line-height: 1.3;
+}
+
+.section {
+  margin-bottom: 16px;
+}
+
+.section h2 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.section label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.section select {
+  width: 100%;
+  padding: 8px 10px;
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.section select:focus {
+  border-color: #e23636;
+}
+
+.model-info {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.model-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.model-desc {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.btn-primary,
+.btn-secondary {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-primary {
+  background: #e23636;
+  color: #fff;
+}
+.btn-primary:hover {
+  background: #c62828;
+}
+
+.btn-secondary {
+  background: #2a2a4a;
+  color: #ccc;
+  border: 1px solid #444;
+}
+.btn-secondary:hover {
+  background: #3a3a5a;
+  color: #fff;
+}
+
+.status {
+  text-align: center;
+  font-size: 12px;
+  color: #4caf50;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.status.show {
+  opacity: 1;
+}
