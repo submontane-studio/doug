@@ -248,6 +248,21 @@
   // ============================================================
   // オーバーレイ描画
   // ============================================================
+  // 背景色(CSS値)から少し暗くしたボーダー色を生成
+  function darkenColor(cssValue) {
+    // linear-gradient の場合、最初の色を抽出
+    const gradMatch = cssValue.match(/#[0-9a-fA-F]{3,8}/);
+    const hex = gradMatch ? gradMatch[0] : null;
+    if (!hex) return null;
+    // hex → RGB → 30%暗く → hex
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    const d = (v) => Math.round(v * 0.7).toString(16).padStart(2, '0');
+    return `#${d(r)}${d(g)}${d(b)}`;
+  }
+
   function renderOverlays(targetEl, translations) {
     if (!targetEl || !translations) return;
     clearOverlays();
@@ -328,6 +343,16 @@
       const textEl = document.createElement('div');
       textEl.className = 'mut-overlay-text';
       textEl.textContent = item.translated;
+      if (item.background) {
+        textEl.style.background = item.background;
+        // 背景色からボーダー色を自動生成（少し暗くした色）
+        const borderColor = item.border || darkenColor(item.background);
+        if (borderColor) {
+          textEl.style.border = `2px solid ${borderColor}`;
+        }
+      } else if (item.border) {
+        textEl.style.border = `2px solid ${item.border}`;
+      }
       overlay.appendChild(textEl);
 
       const origEl = document.createElement('div');

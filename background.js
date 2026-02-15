@@ -308,6 +308,13 @@ function buildTranslationPrompt(targetLang) {
   - x_min: テキスト領域の左端（0=画像左端, 1000=画像右端）
   - y_max: テキスト領域の下端
   - x_max: テキスト領域の右端
+- background: 吹き出し/キャプションの背景色情報（白い吹き出しは省略可）
+  - 単色の場合: 文字列で返す（例: "#ffe082"）
+  - グラデーションの場合: オブジェクトで上端と下端の色を返す
+    例: {"top": "#d4edda", "bottom": "#ffffff"}
+    - top: 吹き出しの上端の色
+    - bottom: 吹き出しの下端の色
+- border: 吹き出し/キャプションの枠線の色（例: "#4a7c59"）。枠線がある場合のみ返す
 
 翻訳ルール:
 - コミックの文脈に合った自然な${langName}にする
@@ -321,7 +328,7 @@ boxルール:
 - テキストが複数行でも1つの吹き出しは1つのエントリにまとめる
 
 JSON配列のみ返してください:
-[{"original":"FIVE...?","translated":"5人…？","type":"speech","box":[20,30,80,180]}]`;
+[{"original":"FIVE...?","translated":"5人…？","type":"speech","box":[20,30,80,180]},{"original":"ROYAL CONSUL...","translated":"王室顧問…","type":"caption","box":[5,10,120,480],"background":{"top":"#d4edda","bottom":"#f0f8e8"},"border":"#4a7c59"}]`;
 }
 
 // レスポンスをパースしてログ出力する共通処理
@@ -528,12 +535,24 @@ function parseVisionResponse(geminiResponse, imageDims) {
           height = (bh / imgH) * 100;
         }
 
-        return {
+        const result = {
           bbox: { top, left, width, height },
           original: r.original || '',
           translated: r.translated,
           type: r.type || 'speech',
         };
+        if (r.background) {
+          if (typeof r.background === 'string') {
+            result.background = r.background;
+          } else if (r.background.top && r.background.bottom) {
+            // グラデーション: APIは色順を逆に返す傾向があるため反転して適用
+            result.background = `linear-gradient(to bottom, ${r.background.bottom}, ${r.background.top})`;
+          }
+        }
+        if (r.border) {
+          result.border = r.border;
+        }
+        return result;
       });
   } catch (err) {
     console.error('[Doug bg] Vision応答のパースに失敗:', err);
