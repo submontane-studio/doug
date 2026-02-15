@@ -53,6 +53,12 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(() => {
       console.log('[Doug bg] offscreen port 切断');
       offscreenPort = null;
+      // 残存コールバックをエラーで解決
+      for (const [id, cb] of ocrCallbacks) {
+        clearTimeout(cb.timeout);
+        cb.resolve({ error: 'Service Workerが再起動しました。もう一度お試しください。' });
+      }
+      ocrCallbacks.clear();
     });
   }
 });
@@ -136,7 +142,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 画像fetch
 // ============================================================
 async function fetchImageAsDataUrl(url) {
-  const res = await fetch(url);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error(`画像の取得に失敗しました（ネットワークエラー）: ${err.message}`);
+  }
+  if (res.status === 403 || res.status === 401) {
+    throw new Error(`画像へのアクセスが拒否されました（${res.status}）。認証が必要な画像の可能性があります。`);
+  }
   if (!res.ok) throw new Error(`画像の取得に失敗: ${res.status}`);
   const buffer = await res.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -207,7 +221,7 @@ async function saveCachedTranslation(imageUrl, targetLang, translations) {
   try {
     await chrome.storage.local.set({ [cacheKey]: cacheData });
     const usage = await chrome.storage.local.getBytesInUse();
-    if (usage > 9 * 1024 * 1024) await cleanOldCache();
+    if (usage > 8 * 1024 * 1024) await cleanOldCache();
   } catch {
     await cleanOldCache();
     try { await chrome.storage.local.set({ [cacheKey]: cacheData }); } catch { /* 諦める */ }
@@ -349,9 +363,15 @@ async function fetchWithRetry(url, options, providerName) {
     if (res.status !== 429) break;
     const errDetail = await res.text().catch(() => '');
     console.log(`[Doug bg] ${providerName} 429 詳細:`, errDetail.substring(0, 300));
-    const wait = (attempt + 1) * 10000;
+    // Retry-After ヘッダーがあればそれを使用、なければ固定バックオフ
+    const retryAfter = res.headers.get('Retry-After');
+    const wait = retryAfter ? (parseInt(retryAfter, 10) || 10) * 1000 : (attempt + 1) * 10000;
     console.log(`[Doug bg] ${wait / 1000}秒後にリトライ (${attempt + 1}/3)`);
     await new Promise(r => setTimeout(r, wait));
+  }
+  // 3回リトライしても429の場合、明示的なメッセージで通知
+  if (res.status === 429) {
+    throw new Error(`${providerName} APIがレート制限中です。しばらく時間をおいてから再度お試しください。`);
   }
   return res;
 }
@@ -499,6 +519,19 @@ async function translateImageWithOpenAI(apiKey, imageDataUrl, targetLang, imageD
   return parseAndLogResults('ChatGPT', content, imageDims);
 }
 
+// 翻訳テキストから「」と末尾の。を除去
+function cleanTranslatedText(text) {
+  if (!text) return text;
+  let s = text;
+  // 文頭の「と文末の」を除去
+  if (s.startsWith('「') && s.endsWith('」')) {
+    s = s.slice(1, -1);
+  }
+  // 末尾の。を除去
+  s = s.replace(/。$/, '');
+  return s;
+}
+
 function parseVisionResponse(geminiResponse, imageDims) {
   let cleaned = geminiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
@@ -538,7 +571,7 @@ function parseVisionResponse(geminiResponse, imageDims) {
         const result = {
           bbox: { top, left, width, height },
           original: r.original || '',
-          translated: r.translated,
+          translated: cleanTranslatedText(r.translated),
           type: r.type || 'speech',
         };
         if (r.background) {

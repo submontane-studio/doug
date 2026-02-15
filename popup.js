@@ -3,9 +3,9 @@
 const $ = (id) => document.getElementById(id);
 
 const PROVIDER_CONFIG = {
-  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey' },
-  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey' },
-  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey' },
+  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,}$/, hint: 'Gemini APIキーは "AIza" で始まる必要があります' },
+  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-/, hint: 'Claude APIキーは "sk-ant-" で始まる必要があります' },
+  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey', pattern: /^sk-/, hint: 'OpenAI APIキーは "sk-" で始まる必要があります' },
 };
 
 function updateProviderUI(provider) {
@@ -57,6 +57,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const apiKey = $(config.keyId).value.trim();
     if (!apiKey) {
       showStatus('APIキーを入力してください', 'err');
+      return;
+    }
+    if (config.pattern && !config.pattern.test(apiKey)) {
+      showStatus(config.hint, 'err');
       return;
     }
     await chrome.storage.local.set({

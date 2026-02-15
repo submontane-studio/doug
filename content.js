@@ -172,16 +172,17 @@
     try {
       ctx.drawImage(element, 0, 0, w, h);
       return canvas.toDataURL('image/jpeg', 0.85);
-    } catch {
-      return null;
+    } catch (err) {
+      if (err.name === 'SecurityError') {
+        throw new Error('セキュリティ制約により画像を取得できません（CORS制限）。別の方法で画像を取得しています...');
+      }
+      throw new Error(`画像の変換に失敗しました: ${err.message}`);
     }
   }
 
   async function captureComic(info) {
     if (info.type === 'svg') return captureSvgImage(info);
-    const direct = captureRasterElement(info.element);
-    if (direct) return direct;
-    throw new Error('画像のキャプチャに失敗しました');
+    return captureRasterElement(info.element);
   }
 
   function getOverlayTarget(info) {
