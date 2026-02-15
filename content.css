@@ -1,6 +1,11 @@
 /* ============================================================
-   Marvel Unlimited Translator - コンテンツスタイル
+   Doug - コンテンツスタイル
    ============================================================ */
+
+/* dialogのoverflow制約を解除して下部の吹き出しが切れるのを防止 */
+dialog.ComicPurchasePaths__Reader[open] {
+  overflow: visible !important;
+}
 
 /* ツールバー */
 #mut-toolbar {
@@ -69,7 +74,7 @@
 /* 翻訳オーバーレイ */
 .mut-overlay {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   border-radius: 4px;
   cursor: default;
@@ -84,16 +89,15 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 3px 5px;
+  padding: 2px 3px;
   font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
   font-weight: 700;
-  line-height: 1.25;
-  overflow: hidden;
+  line-height: 1.15;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  /* フォントサイズはJSで自動調整、初期値 */
-  font-size: 14px;
+  font-size: 12px;
+  box-sizing: border-box;
 }
 
 /* セリフ（吹き出し） */

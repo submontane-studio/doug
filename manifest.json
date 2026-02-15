@@ -1,20 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Marvel Unlimited Translator",
+  "name": "Doug",
   "version": "1.1.0",
-  "description": "Marvel Unlimitedのコミックをリアルタイムで翻訳表示",
+  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "offscreen"
   ],
   "host_permissions": [
     "*://*.marvel.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*"
   ],
   "content_scripts": [
     {
       "matches": ["*://*.marvel.com/*"],
-      "js": ["lib/tesseract.min.js", "content.js"],
+      "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
@@ -22,8 +25,20 @@
   "background": {
     "service_worker": "background.js"
   },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

@@ -22,11 +22,103 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 // ============================================================
+// Offscreen Document 管理（port ベース通信）
+// ============================================================
+let offscreenCreating = null;
+let offscreenPort = null;
+let ocrRequestId = 0;
+const ocrCallbacks = new Map();
+
+// offscreen から port 接続を受け取る
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'offscreen-ocr') {
+    console.log('[Doug bg] offscreen port 接続');
+    offscreenPort = port;
+
+    port.onMessage.addListener((message) => {
+      if (message.type === 'OCR_RESULT') {
+        const cb = ocrCallbacks.get(message.requestId);
+        if (cb) {
+          ocrCallbacks.delete(message.requestId);
+          clearTimeout(cb.timeout);
+          if (message.error) {
+            cb.resolve({ error: message.error });
+          } else {
+            cb.resolve({ results: message.results });
+          }
+        }
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      console.log('[Doug bg] offscreen port 切断');
+      offscreenPort = null;
+    });
+  }
+});
+
+async function ensureOffscreenDocument() {
+  if (offscreenPort) return;
+
+  const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [offscreenUrl],
+  });
+
+  if (existingContexts.length === 0) {
+    if (offscreenCreating) {
+      await offscreenCreating;
+    } else {
+      offscreenCreating = chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['WORKERS'],
+        justification: 'Tesseract.js OCR にWeb Workerが必要',
+      });
+      await offscreenCreating;
+      offscreenCreating = null;
+    }
+  }
+
+  // port 接続を待機
+  for (let i = 0; i < 50; i++) {
+    if (offscreenPort) {
+      console.log('[Doug bg] offscreen 準備完了');
+      return;
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error('Offscreen document の起動がタイムアウトしました');
+}
+
+async function runOcrViaOffscreen(imageData) {
+  await ensureOffscreenDocument();
+
+  const requestId = ++ocrRequestId;
+  console.log('[Doug bg] RUN_OCR送信 id:', requestId, 'データサイズ:', imageData.length);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ocrCallbacks.delete(requestId);
+      reject(new Error('OCR処理がタイムアウトしました（60秒）'));
+    }, 60000);
+
+    ocrCallbacks.set(requestId, { resolve, reject, timeout });
+
+    offscreenPort.postMessage({
+      type: 'RUN_OCR',
+      imageData: imageData,
+      requestId: requestId,
+    });
+  });
+}
+
+// ============================================================
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'TRANSLATE_TEXTS') {
-    handleTranslation(message.ocrResults, message.imageUrl)
+  if (message.type === 'TRANSLATE_IMAGE') {
+    handleImageTranslation(message.imageData, message.imageUrl, message.imageDims)
       .then(result => sendResponse(result))
       .catch(err => sendResponse({ error: err.message }));
     return true;
@@ -66,7 +158,10 @@ async function fetchImageAsDataUrl(url) {
 // ============================================================
 async function getSettings() {
   return chrome.storage.local.get({
+    apiProvider: 'gemini',
     geminiApiKey: '',
+    claudeApiKey: '',
+    openaiApiKey: '',
     targetLang: 'ja',
   });
 }
@@ -74,19 +169,19 @@ async function getSettings() {
 // ============================================================
 // キャッシュ機能
 // ============================================================
-function generateCacheKey(imageUrl, targetLang) {
+async function generateCacheKey(imageUrl, targetLang) {
   if (!imageUrl) throw new Error('imageUrl is required');
-  try {
-    const urlHash = btoa(imageUrl).substring(0, 50);
-    return `cache:${urlHash}:${targetLang}`;
-  } catch {
-    const urlHash = encodeURIComponent(imageUrl).substring(0, 50);
-    return `cache:${urlHash}:${targetLang}`;
-  }
+  // SHA-256でURL全体をハッシュ化（先頭切り詰めによる衝突を防止）
+  const encoder = new TextEncoder();
+  const data = encoder.encode(imageUrl);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return `cache:${hashHex.substring(0, 32)}:${targetLang}`;
 }
 
 async function getCachedTranslation(imageUrl, targetLang) {
-  const cacheKey = generateCacheKey(imageUrl, targetLang);
+  const cacheKey = await generateCacheKey(imageUrl, targetLang);
   try {
     const result = await chrome.storage.local.get(cacheKey);
     const cached = result[cacheKey];
@@ -107,7 +202,7 @@ async function getCachedTranslation(imageUrl, targetLang) {
 }
 
 async function saveCachedTranslation(imageUrl, targetLang, translations) {
-  const cacheKey = generateCacheKey(imageUrl, targetLang);
+  const cacheKey = await generateCacheKey(imageUrl, targetLang);
   const cacheData = { translations, timestamp: Date.now(), version: CACHE_VERSION };
   try {
     await chrome.storage.local.set({ [cacheKey]: cacheData });
@@ -145,33 +240,37 @@ const LANG_NAMES = {
   es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語', pt: 'ポルトガル語',
 };
 
-async function handleTranslation(ocrResults, imageUrl) {
+const PROVIDER_LABELS = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT' };
+const PROVIDER_KEY_MAP = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey' };
+
+async function handleImageTranslation(imageData, imageUrl, imageDims) {
   const settings = await getSettings();
+  const provider = settings.apiProvider || 'gemini';
 
   // キャッシュ確認
   if (imageUrl) {
     const cached = await getCachedTranslation(imageUrl, settings.targetLang);
     if (cached) {
-      console.log('キャッシュから翻訳を取得');
+      console.log('[Doug bg] キャッシュから翻訳を取得');
       return { translations: cached, fromCache: true };
     }
   }
 
-  // OCR結果が空ならAPI不要
-  if (!ocrResults || ocrResults.length === 0) {
-    return { translations: [] };
+  const apiKey = settings[PROVIDER_KEY_MAP[provider]];
+  if (!apiKey) {
+    return { error: `${PROVIDER_LABELS[provider]} APIキーが設定されていません。拡張機能の設定画面でAPIキーを入力してください。` };
   }
 
-  // APIキー確認
-  if (!settings.geminiApiKey) {
-    return { error: 'Gemini APIキーが設定されていません。拡張機能の設定画面でAPIキーを入力してください。' };
-  }
-
-  // 全テキストを1回のAPIコールでバッチ翻訳
   try {
-    const translations = await translateWithGemini(settings.geminiApiKey, ocrResults, settings.targetLang);
+    let translations;
+    if (provider === 'claude') {
+      translations = await translateImageWithClaude(apiKey, imageData, settings.targetLang, imageDims);
+    } else if (provider === 'openai') {
+      translations = await translateImageWithOpenAI(apiKey, imageData, settings.targetLang, imageDims);
+    } else {
+      translations = await translateImageWithGemini(apiKey, imageData, settings.targetLang, imageDims);
+    }
 
-    // キャッシュ保存
     if (translations.length > 0 && imageUrl) {
       await saveCachedTranslation(imageUrl, settings.targetLang, translations);
     }
@@ -182,42 +281,104 @@ async function handleTranslation(ocrResults, imageUrl) {
   }
 }
 
-async function translateWithGemini(apiKey, ocrResults, targetLang) {
+// 画像データURLからbase64とMIMEタイプを抽出
+function parseImageDataUrl(imageDataUrl) {
+  const mimeMatch = imageDataUrl.match(/^data:(image\/\w+);base64,/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
+  return { mimeType, base64Data };
+}
+
+// 全プロバイダー共通の翻訳プロンプト
+function buildTranslationPrompt(targetLang) {
   const langName = LANG_NAMES[targetLang] || targetLang;
+  return `あなたはコミック翻訳の専門家です。この画像に含まれるすべてのテキストを検出・翻訳してください。
 
-  // OCRテキストをまとめて1回のプロンプトで翻訳
-  const textList = ocrResults.map((r, i) => `[${i}] "${r.text}"`).join('\n');
+【検出ルール】
+- 各パネルを上から下、左から右の順にスキャンする
+- すべての吹き出し（speech balloon）、キャプション（caption box）、ナレーション、効果音を漏らさず検出する
+- 小さな吹き出し、暗い背景上の吹き出し、パネルの端にある吹き出しも見逃さない
 
-  const prompt = `コミックの吹き出しテキストを${langName}に翻訳してください。
-番号付きテキストが与えられます。各テキストを自然な${langName}に翻訳し、JSON配列で返してください。
+各テキスト領域についてJSON配列で返してください:
+- original: 元の英語テキスト
+- translated: ${langName}への自然な翻訳（短く簡潔に）
+- type: "speech" / "caption" / "sfx"
+- box: [y_min, x_min, y_max, x_max] — 0〜1000の正規化座標で、テキスト領域の境界を示す
+  - y_min: テキスト領域の上端（0=画像上端, 1000=画像下端）
+  - x_min: テキスト領域の左端（0=画像左端, 1000=画像右端）
+  - y_max: テキスト領域の下端
+  - x_max: テキスト領域の右端
 
-入力テキスト:
-${textList}
+翻訳ルール:
+- コミックの文脈に合った自然な${langName}にする
+- 効果音は表現豊かに翻訳（例: "BOOM" → "ドーン"）
+- 感情・トーンを維持する
+- 翻訳文は簡潔に。吹き出しに収まる長さにする
 
-ルール:
-- コミックの文脈に合った自然な翻訳にする
-- 効果音は表現豊かに翻訳する（例: "BOOM" → "ドーン"）
-- 感情やトーンを維持する
+boxルール:
+- 吹き出し内のテキスト部分を正確に囲む（尻尾は含めない）
+- 隣接する吹き出しのboxが重ならないようにする
+- テキストが複数行でも1つの吹き出しは1つのエントリにまとめる
 
-JSON配列のみ返してください（説明不要）:
-[{"index":0,"translated":"翻訳文"},{"index":1,"translated":"翻訳文"}]`;
+JSON配列のみ返してください:
+[{"original":"FIVE...?","translated":"5人…？","type":"speech","box":[20,30,80,180]}]`;
+}
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+// レスポンスをパースしてログ出力する共通処理
+function parseAndLogResults(providerName, content, imageDims) {
+  console.log(`[Doug bg] ${providerName}応答（全文）:`, content);
+  const results = parseVisionResponse(content, imageDims);
+  results.forEach((r, i) => {
+    console.log(`[Doug bg] 結果[${i}]: "${r.original}" → "${r.translated}" bbox:`, JSON.stringify(r.bbox));
+  });
+  return results;
+}
 
-  const res = await fetch(url, {
+// 429リトライ付きfetch（共通）
+async function fetchWithRetry(url, options, providerName) {
+  let res;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await fetch(url, options);
+    if (res.status !== 429) break;
+    const errDetail = await res.text().catch(() => '');
+    console.log(`[Doug bg] ${providerName} 429 詳細:`, errDetail.substring(0, 300));
+    const wait = (attempt + 1) * 10000;
+    console.log(`[Doug bg] ${wait / 1000}秒後にリトライ (${attempt + 1}/3)`);
+    await new Promise(r => setTimeout(r, wait));
+  }
+  return res;
+}
+
+// ============================================================
+// Gemini API
+// ============================================================
+async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageDims) {
+  const { mimeType, base64Data } = parseImageDataUrl(imageDataUrl);
+  const prompt = buildTranslationPrompt(targetLang);
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+  const body = JSON.stringify({
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: mimeType, data: base64Data } },
+        { text: prompt },
+      ],
+    }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 8000,
+    },
+  });
+
+  const res = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 2000,
-      },
-    }),
-  });
+    body,
+  }, 'Gemini');
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    console.error('[Doug bg] Gemini APIエラー全文:', errBody);
     throw new Error(`Gemini API エラー (${res.status}): ${errBody.substring(0, 200)}`);
   }
 
@@ -225,30 +386,157 @@ JSON配列のみ返してください（説明不要）:
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) throw new Error('Gemini APIから応答がありません');
 
-  return mergeTranslations(ocrResults, content);
+  return parseAndLogResults('Gemini', content, imageDims);
 }
 
-function mergeTranslations(ocrResults, geminiResponse) {
-  // JSONを抽出
+// ============================================================
+// Claude (Anthropic) API
+// ============================================================
+async function translateImageWithClaude(apiKey, imageDataUrl, targetLang, imageDims) {
+  const { mimeType, base64Data } = parseImageDataUrl(imageDataUrl);
+  const prompt = buildTranslationPrompt(targetLang);
+
+  const url = 'https://api.anthropic.com/v1/messages';
+  const body = JSON.stringify({
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 8000,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: mimeType,
+            data: base64Data,
+          },
+        },
+        {
+          type: 'text',
+          text: prompt,
+        },
+      ],
+    }],
+  });
+
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body,
+  }, 'Claude');
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    console.error('[Doug bg] Claude APIエラー全文:', errBody);
+    throw new Error(`Claude API エラー (${res.status}): ${errBody.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const content = data.content?.[0]?.text;
+  if (!content) throw new Error('Claude APIから応答がありません');
+
+  return parseAndLogResults('Claude', content, imageDims);
+}
+
+// ============================================================
+// OpenAI (ChatGPT) API
+// ============================================================
+async function translateImageWithOpenAI(apiKey, imageDataUrl, targetLang, imageDims) {
+  const prompt = buildTranslationPrompt(targetLang);
+
+  const url = 'https://api.openai.com/v1/chat/completions';
+  const body = JSON.stringify({
+    model: 'gpt-4o',
+    max_tokens: 8000,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image_url',
+          image_url: {
+            url: imageDataUrl,
+          },
+        },
+        {
+          type: 'text',
+          text: prompt,
+        },
+      ],
+    }],
+  });
+
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body,
+  }, 'ChatGPT');
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    console.error('[Doug bg] OpenAI APIエラー全文:', errBody);
+    throw new Error(`ChatGPT API エラー (${res.status}): ${errBody.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('ChatGPT APIから応答がありません');
+
+  return parseAndLogResults('ChatGPT', content, imageDims);
+}
+
+function parseVisionResponse(geminiResponse, imageDims) {
   let cleaned = geminiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
   if (!jsonMatch) return [];
 
-  try {
-    const translated = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(translated)) return [];
+  const imgW = imageDims?.width || 1000;
+  const imgH = imageDims?.height || 1500;
 
-    // OCR結果と翻訳をマージ
-    return ocrResults.map((ocr, i) => {
-      const match = translated.find(t => t.index === i);
-      return {
-        bbox: ocr.bbox,
-        original: ocr.text,
-        translated: match ? match.translated : ocr.text,
-        type: 'speech',
-      };
-    });
-  } catch {
+  try {
+    const results = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(results)) return [];
+
+    return results
+      .filter(r => r.translated && (r.box || r.bbox))
+      .map(r => {
+        let top, left, width, height;
+
+        if (r.box && Array.isArray(r.box) && r.box.length === 4) {
+          // 正規化座標 [y_min, x_min, y_max, x_max] (0-1000) → パーセンテージ
+          const [yMin, xMin, yMax, xMax] = r.box;
+          top = (yMin / 1000) * 100;
+          left = (xMin / 1000) * 100;
+          width = ((xMax - xMin) / 1000) * 100;
+          height = ((yMax - yMin) / 1000) * 100;
+        } else if (r.bbox) {
+          // フォールバック: ピクセル座標
+          const bx = r.bbox.x ?? r.bbox.left ?? 0;
+          const by = r.bbox.y ?? r.bbox.top ?? 0;
+          const bw = r.bbox.w ?? r.bbox.width ?? 100;
+          const bh = r.bbox.h ?? r.bbox.height ?? 50;
+          top = (by / imgH) * 100;
+          left = (bx / imgW) * 100;
+          width = (bw / imgW) * 100;
+          height = (bh / imgH) * 100;
+        }
+
+        return {
+          bbox: { top, left, width, height },
+          original: r.original || '',
+          translated: r.translated,
+          type: r.type || 'speech',
+        };
+      });
+  } catch (err) {
+    console.error('[Doug bg] Vision応答のパースに失敗:', err);
     return [];
   }
 }

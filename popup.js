@@ -2,30 +2,68 @@
 
 const $ = (id) => document.getElementById(id);
 
+const PROVIDER_CONFIG = {
+  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey' },
+  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey' },
+  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey' },
+};
+
+function updateProviderUI(provider) {
+  // すべてのAPIキーセクションを非表示
+  Object.values(PROVIDER_CONFIG).forEach(c => {
+    $(c.section).style.display = 'none';
+  });
+  // 選択されたプロバイダーのセクションを表示
+  const config = PROVIDER_CONFIG[provider];
+  if (config) {
+    $(config.section).style.display = '';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await chrome.storage.local.get({
+    apiProvider: 'gemini',
     geminiApiKey: '',
+    claudeApiKey: '',
+    openaiApiKey: '',
     targetLang: 'ja',
   });
 
+  $('apiProvider').value = settings.apiProvider;
   $('geminiApiKey').value = settings.geminiApiKey;
+  $('claudeApiKey').value = settings.claudeApiKey;
+  $('openaiApiKey').value = settings.openaiApiKey;
   $('targetLang').value = settings.targetLang;
 
-  // APIキー表示/非表示トグル
-  $('toggleKeyBtn').addEventListener('click', () => {
-    const input = $('geminiApiKey');
-    input.type = input.type === 'password' ? 'text' : 'password';
+  updateProviderUI(settings.apiProvider);
+
+  // プロバイダー切替
+  $('apiProvider').addEventListener('change', () => {
+    updateProviderUI($('apiProvider').value);
+  });
+
+  // APIキー表示/非表示トグル（全トグルボタン共通）
+  document.querySelectorAll('.toggle-key-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = $(btn.dataset.target);
+      input.type = input.type === 'password' ? 'text' : 'password';
+    });
   });
 
   // 保存ボタン
   $('saveBtn').addEventListener('click', async () => {
-    const apiKey = $('geminiApiKey').value.trim();
+    const provider = $('apiProvider').value;
+    const config = PROVIDER_CONFIG[provider];
+    const apiKey = $(config.keyId).value.trim();
     if (!apiKey) {
       showStatus('APIキーを入力してください', 'err');
       return;
     }
     await chrome.storage.local.set({
-      geminiApiKey: apiKey,
+      apiProvider: provider,
+      geminiApiKey: $('geminiApiKey').value.trim(),
+      claudeApiKey: $('claudeApiKey').value.trim(),
+      openaiApiKey: $('openaiApiKey').value.trim(),
       targetLang: $('targetLang').value,
     });
     showStatus('設定を保存しました', 'ok');

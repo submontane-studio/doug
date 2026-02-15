@@ -1,5 +1,5 @@
-// content.js - Marvel Unlimited コミック翻訳オーバーレイ
-// Tesseract.js OCR（ローカル） + Gemini API 翻訳
+// content.js - Doug コミック翻訳オーバーレイ
+// Tesseract.js OCR（offscreen） + Gemini API 翻訳
 
 (function () {
   'use strict';
@@ -8,57 +8,31 @@
   let overlayContainer = null;
   let toolbar = null;
   let overlaysVisible = true;
-  let ocrWorker = null;
 
   // ============================================================
-  // Tesseract.js OCR 初期化
+  // Gemini Vision 翻訳（画像を直接送信）
   // ============================================================
-  async function getOcrWorker() {
-    if (ocrWorker) return ocrWorker;
-
-    const extUrl = chrome.runtime.getURL('');
-    ocrWorker = await Tesseract.createWorker('eng', 1, {
-      workerPath: extUrl + 'lib/worker.min.js',
-      corePath: extUrl + 'lib/',
-      langPath: extUrl + 'lang/',
-      cacheMethod: 'none',
+  // 画像の実サイズを取得
+  function getImageDimensions(imageDataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => resolve(null);
+      img.src = imageDataUrl;
     });
-    return ocrWorker;
   }
 
-  async function runOcr(imageDataUrl) {
-    const worker = await getOcrWorker();
-    const result = await worker.recognize(imageDataUrl);
-
-    // word レベルで bbox + テキストを抽出
-    const words = [];
-    if (result.data && result.data.lines) {
-      for (const line of result.data.lines) {
-        // 行単位でまとめる（吹き出しのテキストは行単位が適切）
-        const text = line.text.trim();
-        if (!text || text.length < 2) continue; // 短すぎるテキストはスキップ
-
-        const bbox = line.bbox;
-        words.push({
-          text: text,
-          bbox: bbox, // {x0, y0, x1, y1} ピクセル座標
-        });
-      }
-    }
-    return words;
-  }
-
-  // OCR結果のbboxをパーセンテージに変換
-  function convertBboxToPercent(ocrResults, imgWidth, imgHeight) {
-    return ocrResults.map(item => ({
-      text: item.text,
-      bbox: {
-        top: (item.bbox.y0 / imgHeight) * 100,
-        left: (item.bbox.x0 / imgWidth) * 100,
-        width: ((item.bbox.x1 - item.bbox.x0) / imgWidth) * 100,
-        height: ((item.bbox.y1 - item.bbox.y0) / imgHeight) * 100,
-      },
-    }));
+  async function translateImage(imageDataUrl, imageUrl) {
+    const dims = await getImageDimensions(imageDataUrl);
+    const response = await chrome.runtime.sendMessage({
+      type: 'TRANSLATE_IMAGE',
+      imageData: imageDataUrl,
+      imageUrl: imageUrl,
+      imageDims: dims,
+    });
+    if (!response) throw new Error('翻訳応答がありません');
+    if (response.error) throw new Error(response.error);
+    return response;
   }
 
   // ============================================================
@@ -210,16 +184,6 @@
     throw new Error('画像のキャプチャに失敗しました');
   }
 
-  // 画像の実サイズを取得
-  function getImageDimensions(imageDataUrl) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => resolve({ width: 1000, height: 1500 }); // フォールバック
-      img.src = imageDataUrl;
-    });
-  }
-
   function getOverlayTarget(info) {
     if (info.type === 'svg') return info.element;
     return info.element;
@@ -251,33 +215,16 @@
         imageUrl = comicInfo.element.getAttribute('xlink:href') || comicInfo.element.getAttribute('href');
       }
 
-      // Step 1: ローカルOCR（API不使用）
-      showNotification('テキストを認識中（ローカルOCR）...', 'info');
-      const rawOcrResults = await runOcr(imageData);
+      // Gemini Vision でOCR＋翻訳を一括処理
+      showNotification('テキストを認識・翻訳中...', 'info');
+      const response = await translateImage(imageData, imageUrl);
 
-      if (rawOcrResults.length === 0) {
-        showNotification('テキストが検出されませんでした', 'warn');
+      if (!response || response.error) {
+        showNotification(response?.error || '翻訳応答がありません', 'error');
         return;
       }
 
-      // bbox をパーセンテージに変換
-      const dims = await getImageDimensions(imageData);
-      const ocrResults = convertBboxToPercent(rawOcrResults, dims.width, dims.height);
-
-      // Step 2: Gemini API でバッチ翻訳（1回のAPI呼び出し）
-      showNotification(`${ocrResults.length}件のテキストを翻訳中...`, 'info');
-      const response = await chrome.runtime.sendMessage({
-        type: 'TRANSLATE_TEXTS',
-        ocrResults: ocrResults,
-        imageUrl: imageUrl,
-      });
-
-      if (response.error) {
-        showNotification(response.error, 'error');
-        return;
-      }
-
-      if (!response.translations || response.translations.length === 0) {
+      if (!response.translations || !Array.isArray(response.translations) || response.translations.length === 0) {
         showNotification('翻訳結果がありません', 'warn');
         return;
       }
@@ -302,6 +249,7 @@
   // オーバーレイ描画
   // ============================================================
   function renderOverlays(targetEl, translations) {
+    if (!targetEl || !translations) return;
     clearOverlays();
     const rect = targetEl.getBoundingClientRect();
 
@@ -315,18 +263,65 @@
       height: rect.height + 'px',
       pointerEvents: 'none',
       zIndex: '99998',
-      overflow: 'hidden',
+      overflow: 'visible',
     });
 
-    translations.forEach((item) => {
+    // 各アイテムのbbox（%単位）を計算し、重なりを検出してから描画
+    const expandRate = 0.1; // 上下左右10%拡大
+    const layoutItems = translations
+      .filter(item => item.bbox && item.bbox.top != null && item.bbox.left != null && item.type !== 'sfx')
+      .map(item => {
+        const expandX = (item.bbox.width || 5) * expandRate;
+        const expandY = (item.bbox.height || 5) * expandRate;
+        let top = (item.bbox.top || 0) - expandY;
+        let left = (item.bbox.left || 0) - expandX;
+        let bboxW = (item.bbox.width || 5) + expandX * 2;
+        let bboxH = (item.bbox.height || 5) + expandY * 2;
+        // 画像範囲内にクランプ
+        if (top < 0) { bboxH += top; top = 0; }
+        if (left < 0) { bboxW += left; left = 0; }
+        if (left + bboxW > 100) bboxW = 100 - left;
+        if (top + bboxH > 100) bboxH = 100 - top;
+        return { ...item, layout: { top, left, width: bboxW, height: bboxH } };
+      });
+
+    // 重なり検出：垂直方向に重なる場合、上下を縮小
+    for (let i = 0; i < layoutItems.length; i++) {
+      for (let j = i + 1; j < layoutItems.length; j++) {
+        const a = layoutItems[i].layout;
+        const b = layoutItems[j].layout;
+        // 水平方向に重なりがあるか
+        const hOverlap = a.left < b.left + b.width && a.left + a.width > b.left;
+        if (!hOverlap) continue;
+        // 垂直方向の重なり量
+        const aBottom = a.top + a.height;
+        const bBottom = b.top + b.height;
+        const vOverlap = Math.min(aBottom, bBottom) - Math.max(a.top, b.top);
+        if (vOverlap <= 0) continue;
+        // 重なりを半分ずつ縮小
+        const half = vOverlap / 2 + 0.3; // 0.3%の余白
+        if (a.top < b.top) {
+          a.height -= half;
+          b.top += half;
+          b.height -= half;
+        } else {
+          b.height -= half;
+          a.top += half;
+          a.height -= half;
+        }
+      }
+    }
+
+    layoutItems.forEach((item) => {
       const overlay = document.createElement('div');
       overlay.className = `mut-overlay mut-type-${item.type || 'speech'}`;
+      const { top, left, width, height } = item.layout;
       Object.assign(overlay.style, {
         position: 'absolute',
-        top: item.bbox.top + '%',
-        left: item.bbox.left + '%',
-        width: item.bbox.width + '%',
-        height: item.bbox.height + '%',
+        top: top + '%',
+        left: left + '%',
+        width: width + '%',
+        height: height + '%',
         pointerEvents: 'auto',
       });
 
@@ -354,14 +349,29 @@
     overlayContainer.querySelectorAll('.mut-overlay').forEach((overlay) => {
       const textEl = overlay.querySelector('.mut-overlay-text');
       if (!textEl) return;
-      const maxW = overlay.clientWidth;
-      const maxH = overlay.clientHeight;
-      if (maxW === 0 || maxH === 0) return;
-      let fontSize = Math.min(maxW / 4, maxH / 2, 20);
+      const boxW = overlay.clientWidth;
+      const boxH = overlay.clientHeight;
+      if (boxW === 0 || boxH === 0) return;
+
+      // 初期サイズを推定してから、実測で収まるまで縮小
+      const text = textEl.textContent || '';
+      const charCount = text.length;
+      let fontSize = Math.min(Math.sqrt((boxW * boxH) / Math.max(charCount, 1)) * 0.65, 13);
+      fontSize = Math.max(fontSize, 6);
       textEl.style.fontSize = fontSize + 'px';
-      while (fontSize > 6 && (textEl.scrollHeight > maxH || textEl.scrollWidth > maxW)) {
+
+      // 実測で枠内に収まるまで縮小（最大10回）
+      for (let i = 0; i < 10; i++) {
+        if (textEl.scrollWidth <= boxW + 1 && textEl.scrollHeight <= boxH + 1) break;
         fontSize -= 0.5;
+        if (fontSize < 6) break;
         textEl.style.fontSize = fontSize + 'px';
+      }
+
+      // 最小フォントでも高さが足りない場合、ボックスを自動拡大
+      if (fontSize <= 6 && textEl.scrollHeight > boxH + 1) {
+        const neededH = textEl.scrollHeight + 4;
+        overlay.style.height = neededH + 'px';
       }
     });
   }

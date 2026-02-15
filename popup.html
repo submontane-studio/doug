@@ -3,21 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Marvel Unlimited Translator 設定</title>
+  <title>Doug 設定</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
-    <h1>Marvel Unlimited Translator</h1>
+    <h1>Doug</h1>
 
     <div class="section">
+      <label for="apiProvider">APIプロバイダー:</label>
+      <select id="apiProvider">
+        <option value="gemini">Gemini</option>
+        <option value="claude">Claude</option>
+        <option value="openai">ChatGPT</option>
+      </select>
+    </div>
+
+    <div class="section api-key-section" id="geminiKeySection">
       <label for="geminiApiKey">Gemini APIキー:</label>
       <div class="field-with-toggle">
         <input type="password" id="geminiApiKey" placeholder="AIza...">
-        <button id="toggleKeyBtn" class="btn-icon" title="表示/非表示">👁</button>
+        <button class="btn-icon toggle-key-btn" data-target="geminiApiKey" title="表示/非表示">👁</button>
       </div>
       <div class="field-hint">
         <a href="https://aistudio.google.com/apikey" target="_blank">APIキーを取得</a>（無料枠あり）
+      </div>
+    </div>
+
+    <div class="section api-key-section" id="claudeKeySection" style="display:none">
+      <label for="claudeApiKey">Claude APIキー:</label>
+      <div class="field-with-toggle">
+        <input type="password" id="claudeApiKey" placeholder="sk-ant-...">
+        <button class="btn-icon toggle-key-btn" data-target="claudeApiKey" title="表示/非表示">👁</button>
+      </div>
+      <div class="field-hint">
+        <a href="https://console.anthropic.com/settings/keys" target="_blank">APIキーを取得</a>
+      </div>
+    </div>
+
+    <div class="section api-key-section" id="openaiKeySection" style="display:none">
+      <label for="openaiApiKey">OpenAI APIキー:</label>
+      <div class="field-with-toggle">
+        <input type="password" id="openaiApiKey" placeholder="sk-...">
+        <button class="btn-icon toggle-key-btn" data-target="openaiApiKey" title="表示/非表示">👁</button>
+      </div>
+      <div class="field-hint">
+        <a href="https://platform.openai.com/api-keys" target="_blank">APIキーを取得</a>
       </div>
     </div>
 
@@ -33,13 +64,6 @@
         <option value="de">ドイツ語 (German)</option>
         <option value="pt">ポルトガル語 (Portuguese)</option>
       </select>
-    </div>
-
-    <div class="section">
-      <div class="model-info">
-        <div class="model-name">OCR: Tesseract.js（ローカル）</div>
-        <div class="model-desc">翻訳: Gemini API（テキストのみ送信）</div>
-      </div>
     </div>
 
     <div class="actions">
