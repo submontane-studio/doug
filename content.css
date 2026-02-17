@@ -89,10 +89,10 @@ dialog.ComicPurchasePaths__Reader[open] {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 2px 3px;
+  padding: 4px 5px;
   font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.25;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -218,7 +218,7 @@ dialog.ComicPurchasePaths__Reader[open] {
 .mut-prefetch-fill {
   height: 100%;
   width: 0%;
-  background: #e23636;
+  background: #fff;
   transition: width 0.3s ease;
 }
 .mut-prefetch-active .mut-prefetch-fill {

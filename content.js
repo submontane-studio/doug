@@ -1,5 +1,5 @@
 // content.js - Doug コミック翻訳オーバーレイ
-// Tesseract.js OCR（offscreen） + Gemini API 翻訳
+// Gemini/Claude/ChatGPT Vision API 翻訳
 
 (function () {
   'use strict';
@@ -10,25 +10,13 @@
   let overlaysVisible = true;
 
   // ============================================================
-  // Gemini Vision 翻訳（画像を直接送信）
+  // Vision API 翻訳（画像を直接送信）
   // ============================================================
-  // 画像の実サイズを取得
-  function getImageDimensions(imageDataUrl) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => resolve(null);
-      img.src = imageDataUrl;
-    });
-  }
-
   async function translateImage(imageDataUrl, imageUrl) {
-    const dims = await getImageDimensions(imageDataUrl);
     const response = await chrome.runtime.sendMessage({
       type: 'TRANSLATE_IMAGE',
       imageData: imageDataUrl,
       imageUrl: imageUrl,
-      imageDims: dims,
     });
     if (!response) throw new Error('翻訳応答がありません');
     if (response.error) throw new Error(response.error);
@@ -43,26 +31,38 @@
 
     toolbar = document.createElement('div');
     toolbar.id = 'mut-toolbar';
-    toolbar.innerHTML = `
-      <button id="mut-btn-translate" class="mut-btn mut-btn-primary" title="このページを翻訳">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2l1 3"/>
-          <path d="M14 14l3 6 3-6M15.5 18h5"/>
-        </svg>
-        翻訳
-      </button>
-      <button id="mut-btn-toggle" class="mut-btn" title="翻訳の表示/非表示" style="display:none">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-      </button>
-      <button id="mut-btn-clear" class="mut-btn" title="翻訳をクリア" style="display:none">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-    `;
+
+    // ツールバーボタンをDOM APIで構築（innerHTML回避）
+    const translateBtn = document.createElement('button');
+    translateBtn.id = 'mut-btn-translate';
+    translateBtn.className = 'mut-btn mut-btn-primary';
+    translateBtn.title = 'このページを翻訳';
+    translateBtn.insertAdjacentHTML('afterbegin',
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2l1 3"/>' +
+      '<path d="M14 14l3 6 3-6M15.5 18h5"/></svg>');
+    translateBtn.append(' 翻訳');
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.id = 'mut-btn-toggle';
+    toggleBtn.className = 'mut-btn';
+    toggleBtn.title = '翻訳の表示/非表示';
+    toggleBtn.style.display = 'none';
+    toggleBtn.insertAdjacentHTML('afterbegin',
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>' +
+      '<circle cx="12" cy="12" r="3"/></svg>');
+
+    const clearBtn = document.createElement('button');
+    clearBtn.id = 'mut-btn-clear';
+    clearBtn.className = 'mut-btn';
+    clearBtn.title = '翻訳をクリア';
+    clearBtn.style.display = 'none';
+    clearBtn.insertAdjacentHTML('afterbegin',
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>');
+
+    toolbar.append(translateBtn, toggleBtn, clearBtn);
     const parent = getUIParent();
     parent.appendChild(toolbar);
 
@@ -71,7 +71,10 @@
     bar.id = 'mut-prefetch-bar';
     bar.className = 'mut-prefetch-bar';
     bar.style.display = 'none';
-    bar.innerHTML = '<div id="mut-prefetch-fill" class="mut-prefetch-fill"></div>';
+    const fill = document.createElement('div');
+    fill.id = 'mut-prefetch-fill';
+    fill.className = 'mut-prefetch-fill';
+    bar.appendChild(fill);
     parent.appendChild(bar);
 
     document.getElementById('mut-btn-translate').addEventListener('click', translateCurrentPage);
@@ -216,8 +219,20 @@
     btn.classList.add('loading');
     btn.querySelector('svg').style.display = 'none';
 
+    // 翻訳中プログレスバー（赤）を表示
+    const bar = document.getElementById('mut-prefetch-bar');
+    const fill = document.getElementById('mut-prefetch-fill');
+    if (bar && fill) {
+      fill.style.background = '#e23636';
+      fill.style.width = '0%';
+      bar.style.display = '';
+      bar.style.opacity = '';
+      bar.classList.add('mut-prefetch-active');
+    }
+
     try {
       showNotification('画像をキャプチャ中...', 'info');
+      if (fill) fill.style.width = '30%';
       const imageData = await captureComic(comicInfo);
 
       let imageUrl = null;
@@ -227,6 +242,7 @@
 
       // Gemini Vision でOCR＋翻訳を一括処理
       showNotification('テキストを認識・翻訳中...', 'info');
+      if (fill) fill.style.width = '60%';
       const response = await translateImage(imageData, imageUrl);
 
       if (!response || response.error) {
@@ -239,6 +255,7 @@
         return;
       }
 
+      if (fill) fill.style.width = '90%';
       renderOverlays(getOverlayTarget(comicInfo), response.translations);
       showExtraButtons();
 
@@ -252,29 +269,41 @@
       isTranslating = false;
       btn.classList.remove('loading');
       btn.querySelector('svg').style.display = '';
+      // プログレスバー完了→フェードアウト→色をリセット
+      if (bar && fill) {
+        fill.style.width = '100%';
+        bar.classList.remove('mut-prefetch-active');
+        setTimeout(() => {
+          bar.style.opacity = '0';
+          setTimeout(() => {
+            bar.style.display = 'none';
+            bar.style.opacity = '';
+            fill.style.width = '0%';
+            fill.style.background = '';
+          }, 400);
+        }, 800);
+      }
     }
   }
 
   // ============================================================
   // 先読み翻訳
   // ============================================================
+  // PerformanceObserverでコミック画像URLを増分収集
+  const comicPageUrls = new Map(); // pathname → full URL
+
+  const perfObserver = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+      if (entry.name.includes('/digitalcomic/') && entry.name.includes('/jpg_75/') && !entry.name.includes('/thumbnails/')) {
+        try { var p = new URL(entry.name).pathname; } catch { var p = entry.name.split('?')[0]; }
+        if (!comicPageUrls.has(p)) comicPageUrls.set(p, entry.name);
+      }
+    }
+  });
+  perfObserver.observe({ type: 'resource', buffered: true });
+
   function getComicPageUrls() {
-    // performance APIから画像リソースURLを収集
-    const entries = performance.getEntriesByType('resource');
-    // Marvel reader のコミック画像URLパターン: /digitalcomic/...jpg_75/xxxx.jpg(?token=...)
-    // サムネイル(thumbnails/)は除外
-    const filtered = entries
-      .filter(e => e.name.includes('/digitalcomic/') && e.name.includes('/jpg_75/') && !e.name.includes('/thumbnails/'));
-    // パス名ベースで重複除去（トークン違いの同一画像を1つにまとめる）
-    const seen = new Set();
-    return filtered
-      .filter(e => {
-        try { var p = new URL(e.name).pathname; } catch { var p = e.name.split('?')[0]; }
-        if (seen.has(p)) return false;
-        seen.add(p);
-        return true;
-      })
-      .map(e => e.name);
+    return Array.from(comicPageUrls.values());
   }
 
   let lastQueueKey = '';  // 前回送信したキューのキー（重複送信防止）
@@ -375,7 +404,7 @@
     });
 
     // 各アイテムのbbox（%単位）を計算し、重なりを検出してから描画
-    const expandRate = 0.1; // 上下左右10%拡大
+    const expandRate = 0.15; // 上下左右15%拡大（日本語は英語より幅を要する）
     const layoutItems = translations
       .filter(item => item.bbox && item.bbox.top != null && item.bbox.left != null && item.type !== 'sfx')
       .map(item => {
@@ -393,9 +422,10 @@
         return { ...item, layout: { top, left, width: bboxW, height: bboxH } };
       });
 
-    // 重なり検出：垂直方向に重なる場合、上下を縮小
-    for (let i = 0; i < layoutItems.length; i++) {
-      for (let j = i + 1; j < layoutItems.length; j++) {
+    // 重なり検出：垂直方向に重なる場合、上下を縮小（O(n²)のため50件で打ち切り）
+    const overlapLimit = Math.min(layoutItems.length, 50);
+    for (let i = 0; i < overlapLimit; i++) {
+      for (let j = i + 1; j < overlapLimit; j++) {
         const a = layoutItems[i].layout;
         const b = layoutItems[j].layout;
         // 水平方向に重なりがあるか
@@ -464,34 +494,47 @@
 
   function fitAllOverlayText() {
     if (!overlayContainer) return;
-    overlayContainer.querySelectorAll('.mut-overlay').forEach((overlay) => {
+    const overlays = overlayContainer.querySelectorAll('.mut-overlay');
+
+    // フェーズ1: 読み取り（ボックスサイズ取得）+ 初期フォントサイズ設定
+    const items = [];
+    overlays.forEach((overlay) => {
       const textEl = overlay.querySelector('.mut-overlay-text');
       if (!textEl) return;
       const boxW = overlay.clientWidth;
       const boxH = overlay.clientHeight;
       if (boxW === 0 || boxH === 0) return;
-
-      // 初期サイズを推定してから、実測で収まるまで縮小
-      const text = textEl.textContent || '';
-      const charCount = text.length;
-      let fontSize = Math.min(Math.sqrt((boxW * boxH) / Math.max(charCount, 1)) * 0.65, 13);
+      // padding(4px*2)+border(2px*2)=12px を差し引いた実効領域で計算
+      const innerW = Math.max(boxW - 12, 10);
+      const innerH = Math.max(boxH - 12, 10);
+      const charCount = (textEl.textContent || '').length;
+      let fontSize = Math.min(Math.sqrt((innerW * innerH) / Math.max(charCount, 1)) * 0.7, 16);
       fontSize = Math.max(fontSize, 6);
       textEl.style.fontSize = fontSize + 'px';
-
-      // 実測で枠内に収まるまで縮小（最大10回）
-      for (let i = 0; i < 10; i++) {
-        if (textEl.scrollWidth <= boxW + 1 && textEl.scrollHeight <= boxH + 1) break;
-        fontSize -= 0.5;
-        if (fontSize < 6) break;
-        textEl.style.fontSize = fontSize + 'px';
-      }
-
-      // 最小フォントでも高さが足りない場合、ボックスを自動拡大
-      if (fontSize <= 6 && textEl.scrollHeight > boxH + 1) {
-        const neededH = textEl.scrollHeight + 4;
-        overlay.style.height = neededH + 'px';
-      }
+      items.push({ overlay, textEl, boxW, boxH, fontSize });
     });
+
+    // フェーズ2: 読み取り→書き込みを要素ごとに縮小（バッチ化で最小限のリフロー）
+    for (const item of items) {
+      for (let i = 0; i < 10; i++) {
+        if (item.textEl.scrollWidth <= item.boxW + 1 && item.textEl.scrollHeight <= item.boxH + 1) break;
+        item.fontSize -= 0.5;
+        if (item.fontSize < 6) break;
+        item.textEl.style.fontSize = item.fontSize + 'px';
+      }
+    }
+
+    // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大
+    for (const item of items) {
+      if (item.fontSize <= 6) {
+        if (item.textEl.scrollHeight > item.boxH + 1) {
+          item.overlay.style.height = (item.textEl.scrollHeight + 8) + 'px';
+        }
+        if (item.textEl.scrollWidth > item.boxW + 1) {
+          item.overlay.style.width = (item.textEl.scrollWidth + 8) + 'px';
+        }
+      }
+    }
   }
 
   function observePosition(targetEl) {
@@ -558,9 +601,12 @@
   // ============================================================
   // UI配置
   // ============================================================
+  let cachedUIParent = null;
+
   function getUIParent() {
-    const dialog = document.querySelector('dialog.ComicPurchasePaths__Reader[open]');
-    return dialog || document.body;
+    if (cachedUIParent && cachedUIParent.isConnected) return cachedUIParent;
+    cachedUIParent = document.querySelector('dialog.ComicPurchasePaths__Reader[open]') || document.body;
+    return cachedUIParent;
   }
 
   function moveUIToReader() {
@@ -592,28 +638,43 @@
     init();
   }
 
-  // ページ遷移検知: hrefポーリング（Reactが属性ではなくプロパティで更新するため）
+  // ページ遷移検知: SVG image要素のhref属性変更をMutationObserverで監視
   let lastPageHref = '';
-  let pageCheckInterval = null;
+  let pageObserver = null;
+  let watchedImage = null;
 
   function startPageWatcher() {
-    if (pageCheckInterval) return;
-    pageCheckInterval = setInterval(() => {
-      const svgImage = document.querySelector('.rocket-reader image.pageImage');
-      if (!svgImage) return;
-      const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
+    if (pageObserver) return;
+    const svgImage = document.querySelector('.rocket-reader image.pageImage');
+    if (!svgImage) return;
+    watchedImage = svgImage;
+
+    // 初回チェック
+    const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
+    if (href && href !== lastPageHref) {
+      lastPageHref = href;
+      triggerPrefetch(href);
+    }
+
+    pageObserver = new MutationObserver(() => {
+      const href = watchedImage.getAttribute('xlink:href') || watchedImage.getAttribute('href') || '';
       if (href && href !== lastPageHref) {
         lastPageHref = href;
         clearOverlays();
         triggerPrefetch(href);
       }
-    }, 500);
+    });
+    pageObserver.observe(svgImage, {
+      attributes: true,
+      attributeFilter: ['href', 'xlink:href'],
+    });
   }
 
   function stopPageWatcher() {
-    if (pageCheckInterval) {
-      clearInterval(pageCheckInterval);
-      pageCheckInterval = null;
+    if (pageObserver) {
+      pageObserver.disconnect();
+      pageObserver = null;
+      watchedImage = null;
     }
     lastPageHref = '';
     lastQueueKey = '';
@@ -621,6 +682,7 @@
 
   // dialog の開閉を監視
   const dialogObserver = new MutationObserver(() => {
+    cachedUIParent = null; // dialog状態変更時にキャッシュ無効化
     const dialog = document.querySelector('dialog.ComicPurchasePaths__Reader[open]');
     if (dialog) {
       moveUIToReader();
@@ -639,7 +701,8 @@
       }
     }
   });
-  dialogObserver.observe(document.documentElement, {
+  // dialogのopen属性変更と追加/削除を監視
+  dialogObserver.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
@@ -662,6 +725,7 @@
       if (total <= 0) return;
 
       if (state === 'active') {
+        fill.style.background = '';  // 白（CSS既定）に戻す
         bar.style.display = '';
         bar.style.opacity = '';
         bar.classList.add('mut-prefetch-active');
