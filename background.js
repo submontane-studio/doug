@@ -2,6 +2,7 @@
 
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日
 const CACHE_VERSION = '1.1';
+const MARVEL_URL_RE = /^https:\/\/[^/]*\.marvel\.com(\/|$)/;
 
 // ============================================================
 // マイグレーション: sync → local への移行
@@ -28,103 +29,20 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 // ============================================================
-// Offscreen Document 管理（port ベース通信）
-// ============================================================
-let offscreenCreating = null;
-let offscreenPort = null;
-let ocrRequestId = 0;
-const ocrCallbacks = new Map();
-
-// offscreen から port 接続を受け取る
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'offscreen-ocr') {
-    offscreenPort = port;
-
-    port.onMessage.addListener((message) => {
-      if (message.type === 'OCR_RESULT') {
-        const cb = ocrCallbacks.get(message.requestId);
-        if (cb) {
-          ocrCallbacks.delete(message.requestId);
-          clearTimeout(cb.timeout);
-          if (message.error) {
-            cb.resolve({ error: message.error });
-          } else {
-            cb.resolve({ results: message.results });
-          }
-        }
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      offscreenPort = null;
-      // 残存コールバックをエラーで解決
-      for (const [id, cb] of ocrCallbacks) {
-        clearTimeout(cb.timeout);
-        cb.resolve({ error: 'Service Workerが再起動しました。もう一度お試しください。' });
-      }
-      ocrCallbacks.clear();
-    });
-  }
-});
-
-async function ensureOffscreenDocument() {
-  if (offscreenPort) return;
-
-  const offscreenUrl = chrome.runtime.getURL('offscreen.html');
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [offscreenUrl],
-  });
-
-  if (existingContexts.length === 0) {
-    if (offscreenCreating) {
-      await offscreenCreating;
-    } else {
-      offscreenCreating = chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['WORKERS'],
-        justification: 'Tesseract.js OCR にWeb Workerが必要',
-      });
-      await offscreenCreating;
-      offscreenCreating = null;
-    }
-  }
-
-  // port 接続を待機
-  for (let i = 0; i < 50; i++) {
-    if (offscreenPort) {
-      return;
-    }
-    await new Promise(r => setTimeout(r, 100));
-  }
-  throw new Error('Offscreen document の起動がタイムアウトしました');
-}
-
-async function runOcrViaOffscreen(imageData) {
-  await ensureOffscreenDocument();
-
-  const requestId = ++ocrRequestId;
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ocrCallbacks.delete(requestId);
-      reject(new Error('OCR処理がタイムアウトしました（60秒）'));
-    }, 60000);
-
-    ocrCallbacks.set(requestId, { resolve, reject, timeout });
-
-    offscreenPort.postMessage({
-      type: 'RUN_OCR',
-      imageData: imageData,
-      requestId: requestId,
-    });
-  });
-}
-
-// ============================================================
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはmarvel.comドメインのみ許可
+  // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
+  if (sender.id !== chrome.runtime.id) {
+    sendResponse({ error: '不正な送信元です' });
+    return false;
+  }
+  if (sender.tab && !MARVEL_URL_RE.test(sender.tab.url || '')) {
+    sendResponse({ error: '不正な送信元です' });
+    return false;
+  }
+
   if (message.type === 'TRANSLATE_IMAGE') {
     handleImageTranslation(message.imageData, message.imageUrl, message.imageDims)
       .then(result => sendResponse(result))
@@ -176,27 +94,48 @@ async function fetchImageAsDataUrl(url) {
 }
 
 // ============================================================
-// 設定取得
+// 設定取得（メモリキャッシュ）
 // ============================================================
+const SETTINGS_DEFAULTS = {
+  apiProvider: 'gemini',
+  geminiApiKey: '',
+  claudeApiKey: '',
+  openaiApiKey: '',
+  targetLang: 'ja',
+  prefetch: true,
+};
+let settingsCache = null;
+
 async function getSettings() {
-  return chrome.storage.local.get({
-    apiProvider: 'gemini',
-    geminiApiKey: '',
-    claudeApiKey: '',
-    openaiApiKey: '',
-    targetLang: 'ja',
-    prefetch: true,
-  });
+  if (settingsCache) return settingsCache;
+  settingsCache = await chrome.storage.local.get(SETTINGS_DEFAULTS);
+  return settingsCache;
 }
+
+// 設定変更時にキャッシュを無効化
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    const settingKeys = Object.keys(SETTINGS_DEFAULTS);
+    if (settingKeys.some(key => key in changes)) {
+      settingsCache = null;
+    }
+  }
+});
 
 // ============================================================
 // キャッシュ機能
 // ============================================================
-// URLからクエリパラメータを除去（トークン等の変動部分を無視してキャッシュ一致させる）
+// URLからクエリパラメータ・fragment・認証情報を除去（トークン等の変動部分を無視してキャッシュ一致させる）
 function normalizeImageUrl(url) {
   if (!url) return '';
-  try { return new URL(url).origin + new URL(url).pathname; }
-  catch { return url.split('?')[0]; }
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname;
+  } catch {
+    // 認証情報(@以前)を除去してからクエリ・fragmentを除去
+    const stripped = url.replace(/^[^:]+:\/\/[^@]*@/, '');
+    return stripped.split('?')[0].split('#')[0];
+  }
 }
 
 async function generateCacheKey(imageUrl, targetLang) {
@@ -248,11 +187,21 @@ async function saveCachedTranslation(imageUrl, targetLang, translations) {
 async function cleanOldCache() {
   try {
     const allData = await chrome.storage.local.get(null);
-    const sorted = Object.keys(allData)
+    const cacheEntries = Object.keys(allData)
       .filter(key => key.startsWith('cache:'))
-      .map(key => ({ key, timestamp: allData[key].timestamp || 0 }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-    const toDelete = sorted.slice(0, Math.ceil(sorted.length / 2)).map(item => item.key);
+      .map(key => ({ key, timestamp: allData[key].timestamp || 0 }));
+
+    // まずTTL超過のキーを削除
+    const now = Date.now();
+    const expired = cacheEntries.filter(e => now - e.timestamp > CACHE_TTL).map(e => e.key);
+    if (expired.length > 0) {
+      await chrome.storage.local.remove(expired);
+      return;
+    }
+
+    // TTL超過がなければ古い半分を削除
+    const sorted = cacheEntries.sort((a, b) => a.timestamp - b.timestamp);
+    const toDelete = sorted.slice(0, Math.ceil(sorted.length / 2)).map(e => e.key);
     if (toDelete.length > 0) {
       await chrome.storage.local.remove(toDelete);
     }
@@ -297,12 +246,16 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
       ? 'gemini-2.0-flash-lite'
       : undefined;
 
+    // parseは1回だけ実行して各API関数に渡す
+    const parsed = parseImageDataUrl(imageData);
+    const prompt = buildTranslationPrompt(settings.targetLang);
+
     if (provider === 'claude') {
-      translations = await translateImageWithClaude(apiKey, imageData, settings.targetLang, imageDims);
+      translations = await translateImageWithClaude(apiKey, parsed, prompt, imageDims);
     } else if (provider === 'openai') {
-      translations = await translateImageWithOpenAI(apiKey, imageData, settings.targetLang, imageDims);
+      translations = await translateImageWithOpenAI(apiKey, imageData, prompt, imageDims);
     } else {
-      translations = await translateImageWithGemini(apiKey, imageData, settings.targetLang, imageDims, prefetchModel);
+      translations = await translateImageWithGemini(apiKey, parsed, prompt, imageDims, prefetchModel);
     }
 
     if (translations.length > 0 && imageUrl) {
@@ -389,15 +342,25 @@ async function fetchWithRetry(url, options, providerName) {
   return res;
 }
 
+// APIエラーから機密情報を除去して安全なメッセージを抽出
+function extractSafeErrorMessage(errBody) {
+  try {
+    const parsed = JSON.parse(errBody);
+    const msg = parsed?.error?.message || parsed?.error?.type || '';
+    if (msg) return msg.substring(0, 150);
+  } catch { /* JSONでない場合はフォールバック */ }
+  // 生テキストからAPIキーやURLを除去して短縮
+  return errBody.replace(/key=[^&\s"]+/gi, 'key=***').replace(/sk-[^\s"]+/g, 'sk-***').substring(0, 150);
+}
+
 // ============================================================
 // Gemini API
 // ============================================================
-async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageDims, model) {
-  const { mimeType, base64Data } = parseImageDataUrl(imageDataUrl);
-  const prompt = buildTranslationPrompt(targetLang);
+async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model) {
+  const { mimeType, base64Data } = parsed;
 
   const modelName = model || 'gemini-3-flash-preview';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   const body = JSON.stringify({
     contents: [{
       parts: [
@@ -413,14 +376,18 @@ async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageD
 
   const res = await fetchWithRetry(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
     body,
   }, 'Gemini');
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    console.error('[Doug bg] Gemini APIエラー全文:', errBody);
-    throw new Error(`Gemini API エラー (${res.status}): ${errBody.substring(0, 200)}`);
+    const safeMsg = extractSafeErrorMessage(errBody);
+    console.error(`[Doug bg] Gemini APIエラー (${res.status}):`, safeMsg);
+    throw new Error(`Gemini API エラー (${res.status}): ${safeMsg}`);
   }
 
   const data = await res.json();
@@ -433,9 +400,8 @@ async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageD
 // ============================================================
 // Claude (Anthropic) API
 // ============================================================
-async function translateImageWithClaude(apiKey, imageDataUrl, targetLang, imageDims) {
-  const { mimeType, base64Data } = parseImageDataUrl(imageDataUrl);
-  const prompt = buildTranslationPrompt(targetLang);
+async function translateImageWithClaude(apiKey, parsed, prompt, imageDims) {
+  const { mimeType, base64Data } = parsed;
 
   const url = 'https://api.anthropic.com/v1/messages';
   const body = JSON.stringify({
@@ -473,8 +439,9 @@ async function translateImageWithClaude(apiKey, imageDataUrl, targetLang, imageD
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    console.error('[Doug bg] Claude APIエラー全文:', errBody);
-    throw new Error(`Claude API エラー (${res.status}): ${errBody.substring(0, 200)}`);
+    const safeMsg = extractSafeErrorMessage(errBody);
+    console.error(`[Doug bg] Claude APIエラー (${res.status}):`, safeMsg);
+    throw new Error(`Claude API エラー (${res.status}): ${safeMsg}`);
   }
 
   const data = await res.json();
@@ -487,8 +454,7 @@ async function translateImageWithClaude(apiKey, imageDataUrl, targetLang, imageD
 // ============================================================
 // OpenAI (ChatGPT) API
 // ============================================================
-async function translateImageWithOpenAI(apiKey, imageDataUrl, targetLang, imageDims) {
-  const prompt = buildTranslationPrompt(targetLang);
+async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims) {
 
   const url = 'https://api.openai.com/v1/chat/completions';
   const body = JSON.stringify({
@@ -522,8 +488,9 @@ async function translateImageWithOpenAI(apiKey, imageDataUrl, targetLang, imageD
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    console.error('[Doug bg] OpenAI APIエラー全文:', errBody);
-    throw new Error(`ChatGPT API エラー (${res.status}): ${errBody.substring(0, 200)}`);
+    const safeMsg = extractSafeErrorMessage(errBody);
+    console.error(`[Doug bg] OpenAI APIエラー (${res.status}):`, safeMsg);
+    throw new Error(`ChatGPT API エラー (${res.status}): ${safeMsg}`);
   }
 
   const data = await res.json();
@@ -556,24 +523,35 @@ let preloadTotal = 0;          // キュー全体の件数
 let preloadProcessed = 0;      // 処理済み件数
 const prefetchedImages = new Map(); // 先行fetch済み画像 Map<url, dataUrl>
 const PRELOAD_CONCURRENCY = 2;      // 並列翻訳数
+const PRELOAD_MAX_QUEUE = 50;       // キュー上限
+let preloadDebounceTimer = null;    // デバウンス用タイマー
 
 async function handlePreloadQueue(imageUrls, tabId) {
   if (!imageUrls || imageUrls.length === 0) return;
   // prefetch OFF なら何もしない（進捗バーも表示しない）
   const settings = await getSettings();
-  if (!settings.prefetch) return;
-  console.log(`[Doug preload] キュー受信: ${imageUrls.length}件`, imageUrls.map(u => u.split('/').pop()?.split('?')[0]));
-  // 既存キューを置換 + 進捗リセット + 先行fetchキャッシュクリア
-  preloadQueue = [...imageUrls];
-  preloadTabId = tabId;
-  preloadTotal = imageUrls.length;
-  preloadProcessed = 0;
-  prefetchedImages.clear();
-  sendPreloadProgress('active');
-  // 処理ループ未実行なら開始
-  if (!preloadProcessing) {
-    processPreloadQueue();
+  if (!settings.prefetch) {
+    clearTimeout(preloadDebounceTimer);
+    return;
   }
+  // キュー上限を超えるURLは切り捨て
+  const clampedUrls = imageUrls.slice(0, PRELOAD_MAX_QUEUE);
+  console.log(`[Doug preload] キュー受信: ${clampedUrls.length}件`, clampedUrls.map(u => u.split('/').pop()?.split('?')[0]));
+  // デバウンス: 短時間の連続呼び出しを抑制（最後の呼び出しから500ms後に実行）
+  clearTimeout(preloadDebounceTimer);
+  preloadDebounceTimer = setTimeout(() => {
+    // キューを置換 + 進捗リセット + 先行fetchキャッシュクリア
+    preloadQueue = clampedUrls;
+    preloadTabId = tabId;
+    preloadTotal = clampedUrls.length;
+    preloadProcessed = 0;
+    prefetchedImages.clear();
+    sendPreloadProgress('active');
+    // 処理ループ未実行なら開始（実行中なら既存ループが新キューを処理）
+    if (!preloadProcessing) {
+      processPreloadQueue();
+    }
+  }, 500);
 }
 
 async function processPreloadQueue() {
@@ -619,6 +597,7 @@ async function processPreloadQueue() {
     prefetchedImages.clear();
     sendPreloadProgress('done');
   } finally {
+    prefetchedImages.clear();
     preloadProcessing = false;
   }
 }
@@ -683,8 +662,12 @@ function parseVisionResponse(geminiResponse, imageDims) {
   const imgH = imageDims?.height || 1500;
 
   try {
-    // JSON文字列内の制御文字を除去（軽量モデルが稀に出力する）
-    const sanitized = jsonMatch[0].replace(/[\x00-\x1F\x7F]/g, (ch) => ch === '\n' || ch === '\r' || ch === '\t' ? ch : '');
+    // LLM出力のJSON修復:
+    // 1. 制御文字を空白に正規化（生改行・タブ等）
+    // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
+    const sanitized = jsonMatch[0]
+      .replace(/[\x00-\x1F\x7F]+/g, ' ')
+      .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
     const results = JSON.parse(sanitized);
     if (!Array.isArray(results)) return [];
 

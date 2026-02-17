@@ -3,9 +3,9 @@
 const $ = (id) => document.getElementById(id);
 
 const PROVIDER_CONFIG = {
-  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,}$/, hint: 'Gemini APIキーは "AIza" で始まる必要があります' },
-  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-/, hint: 'Claude APIキーは "sk-ant-" で始まる必要があります' },
-  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey', pattern: /^sk-/, hint: 'OpenAI APIキーは "sk-" で始まる必要があります' },
+  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,256}$/, hint: 'Gemini APIキーは "AIza" で始まる39文字程度の英数字です' },
+  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-[0-9A-Za-z_-]{20,256}$/, hint: 'Claude APIキーは "sk-ant-" で始まる英数字です' },
+  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey', pattern: /^sk-[0-9A-Za-z_-]{20,256}$/, hint: 'OpenAI APIキーは "sk-" で始まる英数字です' },
 };
 
 function updateProviderUI(provider) {

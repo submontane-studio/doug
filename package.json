@@ -2,8 +2,5 @@
   "name": "doug",
   "version": "1.1.0",
   "private": true,
-  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
-  "dependencies": {
-    "tesseract.js": "^7.0.0"
-  }
+  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です"
 }
