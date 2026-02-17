@@ -11,6 +11,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     try {
       const syncData = await chrome.storage.sync.get(['apiKey', 'apiProvider', 'targetLang']);
       if (syncData.apiKey || syncData.apiProvider || syncData.targetLang) {
+        // 旧 apiKey → プロバイダーに応じた新キーに変換
+        if (syncData.apiKey) {
+          const provider = syncData.apiProvider || 'gemini';
+          const keyMap = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey' };
+          syncData[keyMap[provider] || 'geminiApiKey'] = syncData.apiKey;
+          delete syncData.apiKey;
+        }
         await chrome.storage.local.set(syncData);
         await chrome.storage.sync.remove(['apiKey', 'apiProvider', 'targetLang']);
       }
@@ -550,8 +557,11 @@ let preloadProcessed = 0;      // 処理済み件数
 const prefetchedImages = new Map(); // 先行fetch済み画像 Map<url, dataUrl>
 const PRELOAD_CONCURRENCY = 2;      // 並列翻訳数
 
-function handlePreloadQueue(imageUrls, tabId) {
+async function handlePreloadQueue(imageUrls, tabId) {
   if (!imageUrls || imageUrls.length === 0) return;
+  // prefetch OFF なら何もしない（進捗バーも表示しない）
+  const settings = await getSettings();
+  if (!settings.prefetch) return;
   console.log(`[Doug preload] キュー受信: ${imageUrls.length}件`, imageUrls.map(u => u.split('/').pop()?.split('?')[0]));
   // 既存キューを置換 + 進捗リセット + 先行fetchキャッシュクリア
   preloadQueue = [...imageUrls];
