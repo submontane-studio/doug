@@ -63,7 +63,16 @@
         </svg>
       </button>
     `;
-    getUIParent().appendChild(toolbar);
+    const parent = getUIParent();
+    parent.appendChild(toolbar);
+
+    // 先読みプログレスバー（画面下部に固定）
+    const bar = document.createElement('div');
+    bar.id = 'mut-prefetch-bar';
+    bar.className = 'mut-prefetch-bar';
+    bar.style.display = 'none';
+    bar.innerHTML = '<div id="mut-prefetch-fill" class="mut-prefetch-fill"></div>';
+    parent.appendChild(bar);
 
     document.getElementById('mut-btn-translate').addEventListener('click', translateCurrentPage);
     document.getElementById('mut-btn-toggle').addEventListener('click', toggleOverlays);
@@ -159,7 +168,7 @@
     const srcW = element instanceof HTMLCanvasElement ? element.width : (element.naturalWidth || element.width);
     const srcH = element instanceof HTMLCanvasElement ? element.height : (element.naturalHeight || element.height);
 
-    const MAX_DIM = 2000;
+    const MAX_DIM = 1024;
     let w = srcW, h = srcH;
     if (w > MAX_DIM || h > MAX_DIM) {
       const scale = Math.min(MAX_DIM / w, MAX_DIM / h);
@@ -171,7 +180,7 @@
     canvas.height = h;
     try {
       ctx.drawImage(element, 0, 0, w, h);
-      return canvas.toDataURL('image/jpeg', 0.85);
+      return canvas.toDataURL('image/webp', 0.65);
     } catch (err) {
       if (err.name === 'SecurityError') {
         throw new Error('セキュリティ制約により画像を取得できません（CORS制限）。別の方法で画像を取得しています...');
@@ -243,6 +252,89 @@
       isTranslating = false;
       btn.classList.remove('loading');
       btn.querySelector('svg').style.display = '';
+    }
+  }
+
+  // ============================================================
+  // 先読み翻訳
+  // ============================================================
+  function getComicPageUrls() {
+    // performance APIから画像リソースURLを収集
+    const entries = performance.getEntriesByType('resource');
+    // Marvel reader のコミック画像URLパターン: /digitalcomic/...jpg_75/xxxx.jpg(?token=...)
+    // サムネイル(thumbnails/)は除外
+    const filtered = entries
+      .filter(e => e.name.includes('/digitalcomic/') && e.name.includes('/jpg_75/') && !e.name.includes('/thumbnails/'));
+    // パス名ベースで重複除去（トークン違いの同一画像を1つにまとめる）
+    const seen = new Set();
+    return filtered
+      .filter(e => {
+        try { var p = new URL(e.name).pathname; } catch { var p = e.name.split('?')[0]; }
+        if (seen.has(p)) return false;
+        seen.add(p);
+        return true;
+      })
+      .map(e => e.name);
+  }
+
+  let lastQueueKey = '';  // 前回送信したキューのキー（重複送信防止）
+
+  function triggerPrefetch(currentImageUrl) {
+    try {
+      const allPages = getComicPageUrls();
+      if (allPages.length === 0) return;
+
+      // URLからファイル名部分を抽出（トークンを除去して比較）
+      const getFilename = (url) => {
+        try { return new URL(url).pathname.split('/').pop(); }
+        catch { return url.split('/').pop().split('?')[0]; }
+      };
+
+      // 現在のページのindexを特定
+      let currentIndex = -1;
+      const currentFile = currentImageUrl ? getFilename(currentImageUrl) : null;
+      if (currentFile) {
+        currentIndex = allPages.findIndex(url => getFilename(url) === currentFile);
+      }
+      // URLでマッチしない場合、SVG要素から取得
+      if (currentIndex === -1) {
+        const svgImage = document.querySelector('.rocket-reader image.pageImage');
+        if (svgImage) {
+          const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
+          const hrefFile = getFilename(href);
+          currentIndex = allPages.findIndex(url => getFilename(url) === hrefFile);
+        }
+      }
+      if (currentIndex === -1) return;
+
+      // 優先度付きキュー: 現在ページ → 次5 → 前2（最大8ページ）
+      const queueUrls = [];
+      const addIfValid = (idx) => {
+        if (idx >= 0 && idx < allPages.length) {
+          queueUrls.push(allPages[idx]);
+        }
+      };
+
+      // 1. 現在ページ
+      addIfValid(currentIndex);
+      // 2. 次ページ × 5
+      for (let i = 1; i <= 5; i++) addIfValid(currentIndex + i);
+      // 3. 前ページ × 2
+      for (let i = 1; i <= 2; i++) addIfValid(currentIndex - i);
+
+      if (queueUrls.length === 0) return;
+
+      // 前回と同じキューなら送信スキップ（ファイル名ベースで比較）
+      const queueKey = queueUrls.map(u => getFilename(u)).join(',');
+      if (queueKey === lastQueueKey) return;
+      lastQueueKey = queueKey;
+
+      chrome.runtime.sendMessage({
+        type: 'PRELOAD_QUEUE',
+        imageUrls: queueUrls,
+      }).catch(() => {});
+    } catch {
+      // 先読みトリガーの失敗は無視
     }
   }
 
@@ -458,7 +550,9 @@
     notif.className = `mut-notif-${type}`;
     notif.classList.add('mut-notif-show');
     clearTimeout(notif._timer);
-    notif._timer = setTimeout(() => notif.classList.remove('mut-notif-show'), 4000);
+    if (type !== 'error') {
+      notif._timer = setTimeout(() => notif.classList.remove('mut-notif-show'), 4000);
+    }
   }
 
   // ============================================================
@@ -474,10 +568,14 @@
     if (!dialog) return;
     if (toolbar && toolbar.parentElement !== dialog) dialog.appendChild(toolbar);
     if (overlayContainer && overlayContainer.parentElement !== dialog) dialog.appendChild(overlayContainer);
+    const bar = document.getElementById('mut-prefetch-bar');
+    if (bar && bar.parentElement !== dialog) dialog.appendChild(bar);
   }
 
   function moveUIToBody() {
     if (toolbar && toolbar.parentElement !== document.body) document.body.appendChild(toolbar);
+    const bar = document.getElementById('mut-prefetch-bar');
+    if (bar && bar.parentElement !== document.body) document.body.appendChild(bar);
   }
 
   // ============================================================
@@ -494,25 +592,95 @@
     init();
   }
 
-  const pageObserver = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (m.type === 'attributes' && m.target.classList?.contains('pageImage')) {
+  // ページ遷移検知: hrefポーリング（Reactが属性ではなくプロパティで更新するため）
+  let lastPageHref = '';
+  let pageCheckInterval = null;
+
+  function startPageWatcher() {
+    if (pageCheckInterval) return;
+    pageCheckInterval = setInterval(() => {
+      const svgImage = document.querySelector('.rocket-reader image.pageImage');
+      if (!svgImage) return;
+      const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
+      if (href && href !== lastPageHref) {
+        lastPageHref = href;
         clearOverlays();
-        return;
+        triggerPrefetch(href);
       }
+    }, 500);
+  }
+
+  function stopPageWatcher() {
+    if (pageCheckInterval) {
+      clearInterval(pageCheckInterval);
+      pageCheckInterval = null;
     }
+    lastPageHref = '';
+    lastQueueKey = '';
+  }
+
+  // dialog の開閉を監視
+  const dialogObserver = new MutationObserver(() => {
     const dialog = document.querySelector('dialog.ComicPurchasePaths__Reader[open]');
     if (dialog) {
       moveUIToReader();
-    } else if (toolbar && toolbar.parentElement !== document.body) {
-      moveUIToBody();
-      clearOverlays();
+      startPageWatcher();
+      // ダイアログopen直後に初回先読みをトリガー
+      const svgImage = dialog.querySelector('.rocket-reader image.pageImage');
+      if (svgImage) {
+        const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
+        if (href) triggerPrefetch(href);
+      }
+    } else {
+      stopPageWatcher();
+      if (toolbar && toolbar.parentElement !== document.body) {
+        moveUIToBody();
+        clearOverlays();
+      }
     }
   });
-  pageObserver.observe(document.documentElement, {
+  dialogObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['href', 'xlink:href', 'open'],
+    attributeFilter: ['open'],
+  });
+
+  // 初回: リーダーが既に開いていれば監視開始
+  if (document.querySelector('dialog.ComicPurchasePaths__Reader[open]')) {
+    startPageWatcher();
+  }
+
+  // 先読み進捗の受信
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'PRELOAD_PROGRESS') {
+      const bar = document.getElementById('mut-prefetch-bar');
+      const fill = document.getElementById('mut-prefetch-fill');
+      if (!bar || !fill) return;
+
+      const { state, current, total } = message;
+      if (total <= 0) return;
+
+      if (state === 'active') {
+        bar.style.display = '';
+        bar.style.opacity = '';
+        bar.classList.add('mut-prefetch-active');
+        const pct = Math.round((current / total) * 100);
+        fill.style.width = Math.max(pct, 2) + '%';
+      }
+
+      if (state === 'done') {
+        fill.style.width = '100%';
+        bar.classList.remove('mut-prefetch-active');
+        setTimeout(() => {
+          bar.style.opacity = '0';
+          setTimeout(() => {
+            bar.style.display = 'none';
+            bar.style.opacity = '';
+            fill.style.width = '0%';
+          }, 400);
+        }, 800);
+      }
+    }
   });
 })();

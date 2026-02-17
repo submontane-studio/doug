@@ -13,7 +13,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       if (syncData.apiKey || syncData.apiProvider || syncData.targetLang) {
         await chrome.storage.local.set(syncData);
         await chrome.storage.sync.remove(['apiKey', 'apiProvider', 'targetLang']);
-        console.log('設定を sync から local に移行しました');
       }
     } catch (err) {
       console.error('設定の移行に失敗:', err);
@@ -32,7 +31,6 @@ const ocrCallbacks = new Map();
 // offscreen から port 接続を受け取る
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'offscreen-ocr') {
-    console.log('[Doug bg] offscreen port 接続');
     offscreenPort = port;
 
     port.onMessage.addListener((message) => {
@@ -51,7 +49,6 @@ chrome.runtime.onConnect.addListener((port) => {
     });
 
     port.onDisconnect.addListener(() => {
-      console.log('[Doug bg] offscreen port 切断');
       offscreenPort = null;
       // 残存コールバックをエラーで解決
       for (const [id, cb] of ocrCallbacks) {
@@ -89,7 +86,6 @@ async function ensureOffscreenDocument() {
   // port 接続を待機
   for (let i = 0; i < 50; i++) {
     if (offscreenPort) {
-      console.log('[Doug bg] offscreen 準備完了');
       return;
     }
     await new Promise(r => setTimeout(r, 100));
@@ -101,7 +97,6 @@ async function runOcrViaOffscreen(imageData) {
   await ensureOffscreenDocument();
 
   const requestId = ++ocrRequestId;
-  console.log('[Doug bg] RUN_OCR送信 id:', requestId, 'データサイズ:', imageData.length);
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -135,6 +130,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(imageData => sendResponse({ imageData }))
       .catch(err => sendResponse({ error: err.message }));
     return true;
+  }
+
+  if (message.type === 'PRELOAD_QUEUE') {
+    handlePreloadQueue(message.imageUrls, sender.tab?.id);
+    sendResponse({ ok: true });
+    return false;
   }
 });
 
@@ -177,17 +178,26 @@ async function getSettings() {
     claudeApiKey: '',
     openaiApiKey: '',
     targetLang: 'ja',
+    prefetch: true,
   });
 }
 
 // ============================================================
 // キャッシュ機能
 // ============================================================
+// URLからクエリパラメータを除去（トークン等の変動部分を無視してキャッシュ一致させる）
+function normalizeImageUrl(url) {
+  if (!url) return '';
+  try { return new URL(url).origin + new URL(url).pathname; }
+  catch { return url.split('?')[0]; }
+}
+
 async function generateCacheKey(imageUrl, targetLang) {
   if (!imageUrl) throw new Error('imageUrl is required');
-  // SHA-256でURL全体をハッシュ化（先頭切り詰めによる衝突を防止）
+  // トークン等を除去したURLでハッシュ生成（先読みと通常翻訳でキャッシュを共有）
+  const normalized = normalizeImageUrl(imageUrl);
   const encoder = new TextEncoder();
-  const data = encoder.encode(imageUrl);
+  const data = encoder.encode(normalized);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -238,7 +248,6 @@ async function cleanOldCache() {
     const toDelete = sorted.slice(0, Math.ceil(sorted.length / 2)).map(item => item.key);
     if (toDelete.length > 0) {
       await chrome.storage.local.remove(toDelete);
-      console.log(`古いキャッシュを${toDelete.length}件削除`);
     }
   } catch (err) {
     console.error('キャッシュクリーンアップエラー:', err);
@@ -257,7 +266,7 @@ const LANG_NAMES = {
 const PROVIDER_LABELS = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT' };
 const PROVIDER_KEY_MAP = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey' };
 
-async function handleImageTranslation(imageData, imageUrl, imageDims) {
+async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
   const settings = await getSettings();
   const provider = settings.apiProvider || 'gemini';
 
@@ -265,7 +274,6 @@ async function handleImageTranslation(imageData, imageUrl, imageDims) {
   if (imageUrl) {
     const cached = await getCachedTranslation(imageUrl, settings.targetLang);
     if (cached) {
-      console.log('[Doug bg] キャッシュから翻訳を取得');
       return { translations: cached, fromCache: true };
     }
   }
@@ -277,12 +285,17 @@ async function handleImageTranslation(imageData, imageUrl, imageDims) {
 
   try {
     let translations;
+    // 先読み時かつGeminiの場合、軽量モデルを使用
+    const prefetchModel = (options?.prefetch && provider === 'gemini')
+      ? 'gemini-2.0-flash-lite'
+      : undefined;
+
     if (provider === 'claude') {
       translations = await translateImageWithClaude(apiKey, imageData, settings.targetLang, imageDims);
     } else if (provider === 'openai') {
       translations = await translateImageWithOpenAI(apiKey, imageData, settings.targetLang, imageDims);
     } else {
-      translations = await translateImageWithGemini(apiKey, imageData, settings.targetLang, imageDims);
+      translations = await translateImageWithGemini(apiKey, imageData, settings.targetLang, imageDims, prefetchModel);
     }
 
     if (translations.length > 0 && imageUrl) {
@@ -345,14 +358,9 @@ JSON配列のみ返してください:
 [{"original":"FIVE...?","translated":"5人…？","type":"speech","box":[20,30,80,180]},{"original":"ROYAL CONSUL...","translated":"王室顧問…","type":"caption","box":[5,10,120,480],"background":{"top":"#d4edda","bottom":"#f0f8e8"},"border":"#4a7c59"}]`;
 }
 
-// レスポンスをパースしてログ出力する共通処理
+// レスポンスをパースする共通処理
 function parseAndLogResults(providerName, content, imageDims) {
-  console.log(`[Doug bg] ${providerName}応答（全文）:`, content);
-  const results = parseVisionResponse(content, imageDims);
-  results.forEach((r, i) => {
-    console.log(`[Doug bg] 結果[${i}]: "${r.original}" → "${r.translated}" bbox:`, JSON.stringify(r.bbox));
-  });
-  return results;
+  return parseVisionResponse(content, imageDims);
 }
 
 // 429リトライ付きfetch（共通）
@@ -361,12 +369,10 @@ async function fetchWithRetry(url, options, providerName) {
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await fetch(url, options);
     if (res.status !== 429) break;
-    const errDetail = await res.text().catch(() => '');
-    console.log(`[Doug bg] ${providerName} 429 詳細:`, errDetail.substring(0, 300));
+    await res.text().catch(() => '');
     // Retry-After ヘッダーがあればそれを使用、なければ固定バックオフ
     const retryAfter = res.headers.get('Retry-After');
     const wait = retryAfter ? (parseInt(retryAfter, 10) || 10) * 1000 : (attempt + 1) * 10000;
-    console.log(`[Doug bg] ${wait / 1000}秒後にリトライ (${attempt + 1}/3)`);
     await new Promise(r => setTimeout(r, wait));
   }
   // 3回リトライしても429の場合、明示的なメッセージで通知
@@ -379,11 +385,12 @@ async function fetchWithRetry(url, options, providerName) {
 // ============================================================
 // Gemini API
 // ============================================================
-async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageDims) {
+async function translateImageWithGemini(apiKey, imageDataUrl, targetLang, imageDims, model) {
   const { mimeType, base64Data } = parseImageDataUrl(imageDataUrl);
   const prompt = buildTranslationPrompt(targetLang);
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+  const modelName = model || 'gemini-3-flash-preview';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{
       parts: [
@@ -532,6 +539,131 @@ function cleanTranslatedText(text) {
   return s;
 }
 
+// ============================================================
+// 先読み翻訳（キュー制御）
+// ============================================================
+let preloadQueue = [];         // 翻訳待ちURL配列
+let preloadProcessing = false; // 処理ループ実行中フラグ
+let preloadTabId = null;       // 先読みリクエスト元のタブID
+let preloadTotal = 0;          // キュー全体の件数
+let preloadProcessed = 0;      // 処理済み件数
+const prefetchedImages = new Map(); // 先行fetch済み画像 Map<url, dataUrl>
+const PRELOAD_CONCURRENCY = 2;      // 並列翻訳数
+
+function handlePreloadQueue(imageUrls, tabId) {
+  if (!imageUrls || imageUrls.length === 0) return;
+  console.log(`[Doug preload] キュー受信: ${imageUrls.length}件`, imageUrls.map(u => u.split('/').pop()?.split('?')[0]));
+  // 既存キューを置換 + 進捗リセット + 先行fetchキャッシュクリア
+  preloadQueue = [...imageUrls];
+  preloadTabId = tabId;
+  preloadTotal = imageUrls.length;
+  preloadProcessed = 0;
+  prefetchedImages.clear();
+  sendPreloadProgress('active');
+  // 処理ループ未実行なら開始
+  if (!preloadProcessing) {
+    processPreloadQueue();
+  }
+}
+
+async function processPreloadQueue() {
+  preloadProcessing = true;
+
+  try {
+    const settings = await getSettings();
+    if (!settings.prefetch) return;
+
+    const apiKey = settings[PROVIDER_KEY_MAP[settings.apiProvider]];
+    if (!apiKey) return;
+
+    let batchIndex = 0;
+
+    while (preloadQueue.length > 0) {
+      // キューから最大2件を取り出す
+      const batch = preloadQueue.splice(0, PRELOAD_CONCURRENCY);
+
+      // 次のバッチの画像を先行fetchする（現在処理中でないもの）
+      const nextUrls = preloadQueue.slice(0, PRELOAD_CONCURRENCY);
+      for (const nextUrl of nextUrls) {
+        if (!prefetchedImages.has(nextUrl)) {
+          // 先行fetchを非同期で開始（awaitしない）
+          fetchImageAsDataUrl(nextUrl)
+            .then(dataUrl => { prefetchedImages.set(nextUrl, dataUrl); })
+            .catch(() => { /* 先行fetchの失敗は無視 */ });
+        }
+      }
+
+      // リクエスト間ディレイ（初回以外）
+      if (batchIndex > 0) {
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      // バッチ内の各アイテムを並列実行
+      const promises = batch.map(url => processPreloadItem(url, settings));
+      await Promise.allSettled(promises);
+
+      batchIndex++;
+    }
+
+    // 完了 + 先行fetchキャッシュクリア
+    prefetchedImages.clear();
+    sendPreloadProgress('done');
+  } finally {
+    preloadProcessing = false;
+  }
+}
+
+// 先読みキューの1アイテムを処理
+async function processPreloadItem(url, settings) {
+  const shortUrl = url.split('/').pop()?.split('?')[0] || url;
+  try {
+    // キャッシュ済みならスキップ（進捗は進める）
+    const existing = await getCachedTranslation(url, settings.targetLang);
+    if (existing) {
+      console.log(`[Doug preload] キャッシュHIT: ${shortUrl}`);
+      preloadProcessed++;
+      sendPreloadProgress('active');
+      return;
+    }
+
+    console.log(`[Doug preload] キャッシュMISS → 翻訳開始: ${shortUrl}`);
+
+    // 先行fetch済みの画像があればそれを使う、なければfetch
+    let imageData;
+    if (prefetchedImages.has(url)) {
+      imageData = prefetchedImages.get(url);
+      prefetchedImages.delete(url);
+    } else {
+      imageData = await fetchImageAsDataUrl(url);
+    }
+
+    const dims = getImageDimsFromDataUrl(imageData);
+    await handleImageTranslation(imageData, url, dims, { prefetch: true });
+  } catch (err) {
+    console.warn(`[Doug preload] エラー: ${shortUrl}`, err.message);
+  }
+
+  preloadProcessed++;
+  sendPreloadProgress('active');
+}
+
+function sendPreloadProgress(state) {
+  if (!preloadTabId) return;
+  chrome.tabs.sendMessage(preloadTabId, {
+    type: 'PRELOAD_PROGRESS',
+    state,
+    current: preloadProcessed,
+    total: preloadTotal,
+  }).catch(() => {});
+}
+
+// base64画像データからサイズを取得（Service Worker用）
+function getImageDimsFromDataUrl(dataUrl) {
+  // Service Workerにはnew Image()がないため、ヘッダーからサイズを推定
+  // 実際のサイズはAPI側で認識するため、デフォルト値を返す
+  return { width: 1024, height: 1536 };
+}
+
 function parseVisionResponse(geminiResponse, imageDims) {
   let cleaned = geminiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
@@ -541,7 +673,9 @@ function parseVisionResponse(geminiResponse, imageDims) {
   const imgH = imageDims?.height || 1500;
 
   try {
-    const results = JSON.parse(jsonMatch[0]);
+    // JSON文字列内の制御文字を除去（軽量モデルが稀に出力する）
+    const sanitized = jsonMatch[0].replace(/[\x00-\x1F\x7F]/g, (ch) => ch === '\n' || ch === '\r' || ch === '\t' ? ch : '');
+    const results = JSON.parse(sanitized);
     if (!Array.isArray(results)) return [];
 
     return results

@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     claudeApiKey: '',
     openaiApiKey: '',
     targetLang: 'ja',
+    prefetch: true,
   });
 
   $('apiProvider').value = settings.apiProvider;
@@ -34,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('claudeApiKey').value = settings.claudeApiKey;
   $('openaiApiKey').value = settings.openaiApiKey;
   $('targetLang').value = settings.targetLang;
+  $('prefetch').checked = settings.prefetch;
 
   updateProviderUI(settings.apiProvider);
 
@@ -69,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       claudeApiKey: $('claudeApiKey').value.trim(),
       openaiApiKey: $('openaiApiKey').value.trim(),
       targetLang: $('targetLang').value,
+      prefetch: $('prefetch').checked,
     });
     showStatus('設定を保存しました', 'ok');
   });

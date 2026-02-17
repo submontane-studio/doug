@@ -204,20 +204,27 @@ dialog.ComicPurchasePaths__Reader[open] {
   box-shadow: 0 2px 12px rgba(183, 28, 28, 0.4);
 }
 
-/* 進捗バー通知 */
-.mut-notif-progress {
-  background: #1a1a2e;
-  color: #e0e0e0;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-  min-width: 300px;
+/* 先読みプログレスバー（画面下部固定） */
+.mut-prefetch-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: 99999;
+  transition: opacity 0.4s;
 }
-.mut-notif-progress::after {
-  content: '';
-  display: block;
-  margin-top: 8px;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
+.mut-prefetch-fill {
+  height: 100%;
+  width: 0%;
+  background: #e23636;
+  transition: width 0.3s ease;
+}
+.mut-prefetch-active .mut-prefetch-fill {
+  animation: mut-prefetch-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mut-prefetch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

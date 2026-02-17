@@ -169,6 +169,24 @@ h1 {
   color: #fff;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.toggle-row input[type="checkbox"] {
+  accent-color: #e23636;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .status {
   text-align: center;
   font-size: 12px;
