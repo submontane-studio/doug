@@ -261,7 +261,8 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
         settings.ollamaEndpoint || 'http://localhost:11434',
         settings.ollamaModel || 'qwen3-vl:8b',
         imageData,
-        prompt
+        prompt,
+        imageDims
       );
     } else if (provider === 'claude') {
       translations = await translateImageWithClaude(apiKey, parsed, prompt, imageDims);
@@ -516,7 +517,7 @@ async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims)
 // ============================================================
 // Ollama API
 // ============================================================
-async function translateImageWithOllama(endpoint, model, imageData, prompt) {
+async function translateImageWithOllama(endpoint, model, imageData, prompt, imageDims) {
   // data:image/jpeg;base64, プレフィックスを除去
   const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
 
@@ -540,14 +541,15 @@ async function translateImageWithOllama(endpoint, model, imageData, prompt) {
     if (res.status === 404) {
       throw new Error(`モデル "${model}" がインストールされていません。設定画面でインストールしてください。`);
     }
-    throw new Error(`Ollama エラー (${res.status}): ${errBody.substring(0, 150)}`);
+    const safeMsg = extractSafeErrorMessage(errBody);
+    throw new Error(`Ollama エラー (${res.status}): ${safeMsg}`);
   }
 
   const data = await res.json();
   const content = data.message?.content;
   if (!content) throw new Error('Ollama から応答がありません');
 
-  return parseVisionResponse(content, null);
+  return parseVisionResponse(content, imageDims);
 }
 
 // 翻訳テキストから「」と末尾の。を除去
@@ -646,11 +648,9 @@ async function processPreloadQueue() {
       batchIndex++;
     }
 
-    // 完了 + 先行fetchキャッシュクリア
-    prefetchedImages.clear();
-    sendPreloadProgress('done');
   } finally {
     prefetchedImages.clear();
+    sendPreloadProgress('done');
     preloadProcessing = false;
   }
 }
