@@ -2,6 +2,8 @@
 
 const $ = (id) => document.getElementById(id);
 
+let isPulling = false;
+
 const PROVIDER_CONFIG = {
   gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,256}$/, hint: 'Gemini APIキーは "AIza" で始まる39文字程度の英数字です' },
   claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-[0-9A-Za-z_-]{20,256}$/, hint: 'Claude APIキーは "sk-ant-" で始まる英数字です' },
@@ -23,6 +25,7 @@ function updateProviderUI(provider) {
 }
 
 async function checkOllamaStatus() {
+  if (isPulling) return;
   const endpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
   const model = $('ollamaModel').value;
   const statusEl = $('ollamaStatus');
@@ -66,6 +69,7 @@ async function pullModel() {
   const progressText = $('ollamaProgressText');
   const installBtn = $('ollamaInstallBtn');
 
+  isPulling = true;
   installBtn.disabled = true;
   progressEl.style.display = '';
   progressFill.style.width = '0%';
@@ -79,6 +83,7 @@ async function pullModel() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+    if (!res.body) throw new Error('レスポンスボディが取得できません');
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
@@ -109,7 +114,12 @@ async function pullModel() {
   } catch (err) {
     showStatus(`インストールに失敗しました: ${err.message}`, 'err');
   } finally {
+    isPulling = false;
     installBtn.disabled = false;
+    // pull 失敗時はプログレスエリアを非表示に戻す
+    if (progressFill.style.width !== '100%') {
+      progressEl.style.display = 'none';
+    }
   }
 }
 
