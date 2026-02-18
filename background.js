@@ -29,6 +29,26 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 // ============================================================
+// Port通信ハンドラー（TRANSLATE_IMAGE: 長時間処理のためタイムアウトなしのPortを使用）
+// ============================================================
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'translate') return;
+  const sender = port.sender;
+  if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
+  if (sender.tab && !MARVEL_URL_RE.test(sender.tab.url || '')) { port.disconnect(); return; }
+
+  port.onMessage.addListener(async (message) => {
+    if (message.type !== 'TRANSLATE_IMAGE') return;
+    try {
+      const result = await handleImageTranslation(message.imageData, message.imageUrl, message.imageDims);
+      port.postMessage(result);
+    } catch (err) {
+      port.postMessage({ error: err.message });
+    }
+  });
+});
+
+// ============================================================
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -43,11 +63,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === 'TRANSLATE_IMAGE') {
-    handleImageTranslation(message.imageData, message.imageUrl, message.imageDims)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
+  if (message.type === 'KEEP_ALIVE') {
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (message.type === 'FETCH_IMAGE') {
@@ -538,6 +556,9 @@ async function translateImageWithOllama(endpoint, model, imageData, prompt, imag
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    if (res.status === 403) {
+      throw new Error('Ollama のアクセスが拒否されました (403)。ターミナルで「launchctl setenv OLLAMA_ORIGINS "*"」を実行して Ollama を再起動してください。');
+    }
     if (res.status === 404) {
       throw new Error(`モデル "${model}" がインストールされていません。設定画面でインストールしてください。`);
     }

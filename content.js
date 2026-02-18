@@ -10,17 +10,142 @@
   let overlaysVisible = true;
 
   // ============================================================
+  // Ollama 直接呼び出し（Service Worker タイムアウト回避）
+  // content script はページ側で動くため長時間処理でも停止しない
+  // ============================================================
+  const OLLAMA_LANG_NAMES = {
+    ja: '日本語', ko: '韓国語', 'zh-CN': '簡体字中国語', 'zh-TW': '繁体字中国語',
+    es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語', pt: 'ポルトガル語',
+  };
+
+  function ollamaCleanText(text) {
+    if (!text) return text;
+    let s = text;
+    if (s.startsWith('「') && s.endsWith('」')) s = s.slice(1, -1);
+    return s.replace(/。$/, '');
+  }
+
+  function ollamaParseResponse(content) {
+    const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    try {
+      const sanitized = jsonMatch[0]
+        .replace(/[\x00-\x1F\x7F]+/g, ' ')
+        .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
+      const results = JSON.parse(sanitized);
+      if (!Array.isArray(results)) return [];
+      return results.filter(r => r.translated && (r.box || r.bbox)).map(r => {
+        let top, left, width, height;
+        if (r.box && Array.isArray(r.box) && r.box.length === 4) {
+          const [yMin, xMin, yMax, xMax] = r.box;
+          top = (yMin / 1000) * 100; left = (xMin / 1000) * 100;
+          width = ((xMax - xMin) / 1000) * 100; height = ((yMax - yMin) / 1000) * 100;
+        } else if (r.bbox) {
+          const bx = r.bbox.x ?? r.bbox.left ?? 0, by = r.bbox.y ?? r.bbox.top ?? 0;
+          const bw = r.bbox.w ?? r.bbox.width ?? 100, bh = r.bbox.h ?? r.bbox.height ?? 50;
+          top = (by / 1500) * 100; left = (bx / 1000) * 100;
+          width = (bw / 1000) * 100; height = (bh / 1500) * 100;
+        }
+        const result = { bbox: { top, left, width, height }, original: r.original || '', translated: ollamaCleanText(r.translated), type: r.type || 'speech' };
+        if (r.background) {
+          result.background = typeof r.background === 'string'
+            ? r.background
+            : (r.background.top && r.background.bottom ? `linear-gradient(to bottom, ${r.background.bottom}, ${r.background.top})` : undefined);
+        }
+        if (r.border) result.border = r.border;
+        return result;
+      });
+    } catch { return []; }
+  }
+
+  async function translateWithOllamaDirect(imageDataUrl) {
+    const settings = await chrome.storage.local.get({
+      ollamaModel: 'qwen3-vl:8b',
+      ollamaEndpoint: 'http://localhost:11434',
+      targetLang: 'ja',
+    });
+    const { ollamaModel: model, ollamaEndpoint: endpoint, targetLang } = settings;
+    const langName = OLLAMA_LANG_NAMES[targetLang] || targetLang;
+    const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
+    const prompt = `あなたはコミック翻訳の専門家です。この画像に含まれるすべてのテキストを検出・翻訳してください。
+
+【検出ルール】
+- 各パネルを上から下、左から右の順にスキャンする
+- すべての吹き出し（speech balloon）、キャプション（caption box）、ナレーション、効果音を漏らさず検出する
+- 小さな吹き出し、暗い背景上の吹き出し、パネルの端にある吹き出しも見逃さない
+
+各テキスト領域についてJSON配列で返してください:
+- original: 元の英語テキスト
+- translated: ${langName}への自然な翻訳（短く簡潔に）
+- type: "speech" / "caption" / "sfx"
+- box: [y_min, x_min, y_max, x_max] — 0〜1000の正規化座標で、テキスト領域の境界を示す
+  - y_min: テキスト領域の上端（0=画像上端, 1000=画像下端）
+  - x_min: テキスト領域の左端（0=画像左端, 1000=画像右端）
+  - y_max: テキスト領域の下端
+  - x_max: テキスト領域の右端
+- background: 吹き出し/キャプションの背景色情報（白い吹き出しは省略可）
+  - 単色の場合: 文字列で返す（例: "#ffe082"）
+  - グラデーションの場合: オブジェクトで上端と下端の色を返す
+    例: {"top": "#d4edda", "bottom": "#ffffff"}
+- border: 吹き出し/キャプションの枠線の色（例: "#4a7c59"）。枠線がある場合のみ返す
+
+翻訳ルール:
+- コミックの文脈に合った自然な${langName}にする
+- 効果音は表現豊かに翻訳（例: "BOOM" → "ドーン"）
+- 感情・トーンを維持する
+- 翻訳文は簡潔に。吹き出しに収まる長さにする
+
+boxルール:
+- 吹き出し内のテキスト部分を正確に囲む（尻尾は含めない）
+- 隣接する吹き出しのboxが重ならないようにする
+- テキストが複数行でも1つの吹き出しは1つのエントリにまとめる
+
+JSON配列のみ返してください:
+[{"original":"FIVE...?","translated":"5人…？","type":"speech","box":[20,30,80,180]},{"original":"ROYAL CONSUL...","translated":"王室顧問…","type":"caption","box":[5,10,120,480],"background":{"top":"#d4edda","bottom":"#f0f8e8"},"border":"#4a7c59"}]`;
+
+    let res;
+    try {
+      res = await fetch(`${endpoint}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt, images: [base64Data] }], stream: false }),
+      });
+    } catch {
+      throw new Error('Ollama が起動していません。起動してから再試行してください。');
+    }
+    if (res.status === 403) throw new Error('Ollama のアクセスが拒否されました (403)。OLLAMA_ORIGINS の設定が必要です。');
+    if (res.status === 404) throw new Error(`モデル "${model}" がインストールされていません。設定画面でインストールしてください。`);
+    if (!res.ok) throw new Error(`Ollama エラー (${res.status})`);
+    const data = await res.json();
+    const text = data.message?.content;
+    if (!text) throw new Error('Ollama から応答がありません');
+    return { translations: ollamaParseResponse(text) };
+  }
+
+  // ============================================================
   // Vision API 翻訳（画像を直接送信）
   // ============================================================
   async function translateImage(imageDataUrl, imageUrl) {
-    const response = await chrome.runtime.sendMessage({
-      type: 'TRANSLATE_IMAGE',
-      imageData: imageDataUrl,
-      imageUrl: imageUrl,
+    // Ollama は content script から直接呼び出す（Service Worker タイムアウト回避）
+    const { apiProvider } = await chrome.storage.local.get({ apiProvider: 'gemini' });
+    if (apiProvider === 'ollama') {
+      return translateWithOllamaDirect(imageDataUrl);
+    }
+
+    return new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: 'translate' });
+      port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl });
+      port.onMessage.addListener((response) => {
+        port.disconnect();
+        if (response.error) reject(new Error(response.error));
+        else resolve(response);
+      });
+      port.onDisconnect.addListener(() => {
+        const err = chrome.runtime.lastError;
+        reject(new Error(err?.message || '翻訳接続が切断されました'));
+      });
     });
-    if (!response) throw new Error('翻訳応答がありません');
-    if (response.error) throw new Error(response.error);
-    return response;
   }
 
   // ============================================================

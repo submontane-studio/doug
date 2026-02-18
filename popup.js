@@ -39,11 +39,18 @@ async function checkOllamaStatus() {
 
   try {
     const res = await fetch(`${endpoint}/api/tags`);
+    if (res.status === 403) {
+      statusEl.textContent = '⚠ Ollama のアクセス拒否 (403) — OLLAMA_ORIGINS の設定が必要です';
+      statusEl.className = 'ollama-status err';
+      downloadHint.innerHTML = 'ターミナルで実行して Ollama を再起動:<br><code>launchctl setenv OLLAMA_ORIGINS "*"</code>';
+      downloadHint.style.display = '';
+      return;
+    }
     if (!res.ok) throw new Error('接続エラー');
     const data = await res.json();
     const models = data.models || [];
     // モデル名の前方一致で判定（:タグ違いも許容）
-    const installed = models.some(m => m.name === model || m.name.startsWith(model.split(':')[0] + ':'));
+    const installed = models.some(m => m.name === model);
 
     if (installed) {
       statusEl.textContent = `✓ Ollama 起動中 / ✓ ${model} 準備完了`;
