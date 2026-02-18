@@ -529,7 +529,7 @@ JSON配列のみ返してください:
     });
 
     // 各アイテムのbbox（%単位）を計算し、重なりを検出してから描画
-    const expandRate = 0.15; // 上下左右15%拡大（日本語は英語より幅を要する）
+    const expandRate = 0.20; // 上下左右20%拡大
     const layoutItems = translations
       .filter(item => item.bbox && item.bbox.top != null && item.bbox.left != null && item.type !== 'sfx')
       .map(item => {
@@ -613,7 +613,8 @@ JSON配列のみ返してください:
 
     getUIParent().appendChild(overlayContainer);
     overlaysVisible = true;
-    fitAllOverlayText();
+    // ブラウザのレイアウト確定後にフォントフィットを実行
+    requestAnimationFrame(() => fitAllOverlayText());
     observePosition(targetEl);
   }
 
@@ -629,24 +630,28 @@ JSON配列のみ返してください:
       const boxW = overlay.clientWidth;
       const boxH = overlay.clientHeight;
       if (boxW === 0 || boxH === 0) return;
-      // padding(4px*2)+border(2px*2)=12px を差し引いた実効領域で計算
-      const innerW = Math.max(boxW - 12, 10);
-      const innerH = Math.max(boxH - 12, 10);
+      // padding(5px*2)+border(2px*2)=14px 水平、padding(5px*2)+border(2px*2)=14px 垂直
+      const innerW = Math.max(boxW - 18, 10);
+      const innerH = Math.max(boxH - 14, 10);
       const charCount = (textEl.textContent || '').length;
-      let fontSize = Math.min(Math.sqrt((innerW * innerH) / Math.max(charCount, 1)) * 0.7, 16);
-      fontSize = Math.max(fontSize, 6);
+      // 0.58: 日本語は英語より文字幅が大きいため保守的な初期値にする
+      let fontSize = Math.min(Math.sqrt((innerW * innerH) / Math.max(charCount, 1)) * 0.58, 12);
+      fontSize = Math.max(fontSize, 5);
       textEl.style.fontSize = fontSize + 'px';
       items.push({ overlay, textEl, boxW, boxH, fontSize });
     });
 
     // フェーズ2: 読み取り→書き込みを要素ごとに縮小（バッチ化で最小限のリフロー）
     for (const item of items) {
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 30; i++) {
         if (item.textEl.scrollWidth <= item.boxW + 1 && item.textEl.scrollHeight <= item.boxH + 1) break;
-        item.fontSize -= 0.5;
-        if (item.fontSize < 6) break;
+        item.fontSize -= 0.3;
+        if (item.fontSize < 5) break;
         item.textEl.style.fontSize = item.fontSize + 'px';
       }
+      // フィット後に30%縮小して余裕を確保
+      const relaxed = Math.max(item.fontSize * 0.70, 5);
+      item.textEl.style.fontSize = relaxed + 'px';
     }
 
     // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大
