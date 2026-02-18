@@ -135,13 +135,19 @@ JSON配列のみ返してください:
 
     return new Promise((resolve, reject) => {
       const port = chrome.runtime.connect({ name: 'translate' });
+      // Service Worker が 30 秒でスリープするのを防ぐため 10 秒ごとに ping
+      const keepAliveId = setInterval(() => {
+        chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {});
+      }, 10000);
       port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl });
       port.onMessage.addListener((response) => {
+        clearInterval(keepAliveId);
         port.disconnect();
         if (response.error) reject(new Error(response.error));
         else resolve(response);
       });
       port.onDisconnect.addListener(() => {
+        clearInterval(keepAliveId);
         const err = chrome.runtime.lastError;
         reject(new Error(err?.message || '翻訳接続が切断されました'));
       });
@@ -529,12 +535,13 @@ JSON配列のみ返してください:
     });
 
     // 各アイテムのbbox（%単位）を計算し、重なりを検出してから描画
-    const expandRate = 0.20; // 上下左右20%拡大
+    const expandRateX = 0.20; // 左右20%拡大
+    const expandRateY = 0.35; // 上下35%拡大（日本語は縦に長くなりやすいため多めに確保）
     const layoutItems = translations
       .filter(item => item.bbox && item.bbox.top != null && item.bbox.left != null && item.type !== 'sfx')
       .map(item => {
-        const expandX = (item.bbox.width || 5) * expandRate;
-        const expandY = (item.bbox.height || 5) * expandRate;
+        const expandX = (item.bbox.width || 5) * expandRateX;
+        const expandY = (item.bbox.height || 5) * expandRateY;
         let top = (item.bbox.top || 0) - expandY;
         let left = (item.bbox.left || 0) - expandX;
         let bboxW = (item.bbox.width || 5) + expandX * 2;
@@ -608,6 +615,11 @@ JSON配列のみ返してください:
       origEl.textContent = item.original;
       overlay.appendChild(origEl);
 
+      const resizeHandle = document.createElement('div');
+      resizeHandle.className = 'mut-resize-handle';
+      overlay.appendChild(resizeHandle);
+
+      makeDraggableResizable(overlay, resizeHandle);
       overlayContainer.appendChild(overlay);
     });
 
@@ -616,6 +628,54 @@ JSON配列のみ返してください:
     // ブラウザのレイアウト確定後にフォントフィットを実行
     requestAnimationFrame(() => fitAllOverlayText());
     observePosition(targetEl);
+  }
+
+  function makeDraggableResizable(overlay, resizeHandle) {
+    const getContainerRect = () => overlayContainer.getBoundingClientRect();
+
+    // ドラッグで移動
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === resizeHandle) return;
+      e.preventDefault();
+      e.stopPropagation();
+      overlay.dataset.dragging = '1';
+      const rect = getContainerRect();
+      const startX = e.clientX, startY = e.clientY;
+      const startLeft = parseFloat(overlay.style.left);
+      const startTop = parseFloat(overlay.style.top);
+      const onMove = (e) => {
+        overlay.style.left = Math.max(0, startLeft + (e.clientX - startX) / rect.width * 100) + '%';
+        overlay.style.top  = Math.max(0, startTop  + (e.clientY - startY) / rect.height * 100) + '%';
+      };
+      const onUp = () => {
+        delete overlay.dataset.dragging;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // 右下ハンドルでリサイズ
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = getContainerRect();
+      const startX = e.clientX, startY = e.clientY;
+      const startW = parseFloat(overlay.style.width);
+      const startH = parseFloat(overlay.style.height);
+      const onMove = (e) => {
+        overlay.style.width  = Math.max(5, startW + (e.clientX - startX) / rect.width  * 100) + '%';
+        overlay.style.height = Math.max(3, startH + (e.clientY - startY) / rect.height * 100) + '%';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        requestAnimationFrame(() => fitAllOverlayText());
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   function fitAllOverlayText() {
