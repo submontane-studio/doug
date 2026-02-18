@@ -101,6 +101,8 @@ const SETTINGS_DEFAULTS = {
   geminiApiKey: '',
   claudeApiKey: '',
   openaiApiKey: '',
+  ollamaModel: 'qwen3-vl:8b',
+  ollamaEndpoint: 'http://localhost:11434',
   targetLang: 'ja',
   prefetch: true,
 };
@@ -219,8 +221,8 @@ const LANG_NAMES = {
   es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語', pt: 'ポルトガル語',
 };
 
-const PROVIDER_LABELS = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT' };
-const PROVIDER_KEY_MAP = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey' };
+const PROVIDER_LABELS = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT', ollama: 'Ollama' };
+const PROVIDER_KEY_MAP = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey', ollama: null };
 
 async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
   const settings = await getSettings();
@@ -234,9 +236,13 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
     }
   }
 
-  const apiKey = settings[PROVIDER_KEY_MAP[provider]];
-  if (!apiKey) {
-    return { error: `${PROVIDER_LABELS[provider]} APIキーが設定されていません。拡張機能の設定画面でAPIキーを入力してください。` };
+  // Ollama 以外はAPIキーをチェック
+  let apiKey;
+  if (provider !== 'ollama') {
+    apiKey = settings[PROVIDER_KEY_MAP[provider]];
+    if (!apiKey) {
+      return { error: `${PROVIDER_LABELS[provider]} APIキーが設定されていません。拡張機能の設定画面でAPIキーを入力してください。` };
+    }
   }
 
   try {
@@ -250,7 +256,14 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
     const parsed = parseImageDataUrl(imageData);
     const prompt = buildTranslationPrompt(settings.targetLang);
 
-    if (provider === 'claude') {
+    if (provider === 'ollama') {
+      translations = await translateImageWithOllama(
+        settings.ollamaEndpoint || 'http://localhost:11434',
+        settings.ollamaModel || 'qwen3-vl:8b',
+        imageData,
+        prompt
+      );
+    } else if (provider === 'claude') {
       translations = await translateImageWithClaude(apiKey, parsed, prompt, imageDims);
     } else if (provider === 'openai') {
       translations = await translateImageWithOpenAI(apiKey, imageData, prompt, imageDims);
@@ -500,6 +513,43 @@ async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims)
   return parseAndLogResults('ChatGPT', content, imageDims);
 }
 
+// ============================================================
+// Ollama API
+// ============================================================
+async function translateImageWithOllama(endpoint, model, imageData, prompt) {
+  // data:image/jpeg;base64, プレフィックスを除去
+  const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+
+  let res;
+  try {
+    res = await fetch(`${endpoint}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt, images: [base64Data] }],
+        stream: false,
+      }),
+    });
+  } catch {
+    throw new Error('Ollama が起動していません。起動してから再試行してください。');
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    if (res.status === 404) {
+      throw new Error(`モデル "${model}" がインストールされていません。設定画面でインストールしてください。`);
+    }
+    throw new Error(`Ollama エラー (${res.status}): ${errBody.substring(0, 150)}`);
+  }
+
+  const data = await res.json();
+  const content = data.message?.content;
+  if (!content) throw new Error('Ollama から応答がありません');
+
+  return parseVisionResponse(content, null);
+}
+
 // 翻訳テキストから「」と末尾の。を除去
 function cleanTranslatedText(text) {
   if (!text) return text;
@@ -561,8 +611,11 @@ async function processPreloadQueue() {
     const settings = await getSettings();
     if (!settings.prefetch) return;
 
-    const apiKey = settings[PROVIDER_KEY_MAP[settings.apiProvider]];
-    if (!apiKey) return;
+    const provider = settings.apiProvider || 'gemini';
+    if (provider !== 'ollama') {
+      const apiKey = settings[PROVIDER_KEY_MAP[provider]];
+      if (!apiKey) return;
+    }
 
     let batchIndex = 0;
 
