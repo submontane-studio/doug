@@ -198,3 +198,24 @@ h1 {
 .status.show {
   opacity: 1;
 }
+
+/* Ollama ステータス */
+.ollama-status { font-size: 12px; margin-bottom: 8px; min-height: 16px; }
+.ollama-status.ok   { color: #4caf50; }
+.ollama-status.warn { color: #ff9800; }
+.ollama-status.err  { color: #f44336; }
+
+/* Ollama プログレスバー */
+.ollama-progress-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ollama-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #4caf50;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
