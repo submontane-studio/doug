@@ -16,6 +16,7 @@
         <option value="gemini">Gemini</option>
         <option value="claude">Claude</option>
         <option value="openai">ChatGPT</option>
+        <option value="ollama">Ollama (ローカル)</option>
       </select>
     </div>
 
@@ -49,6 +50,30 @@
       </div>
       <div class="field-hint">
         <a href="https://platform.openai.com/api-keys" target="_blank">APIキーを取得</a>
+      </div>
+    </div>
+
+    <div class="section api-key-section" id="ollamaSection" style="display:none">
+      <div id="ollamaStatus" class="ollama-status"></div>
+      <label for="ollamaModel">モデル:</label>
+      <select id="ollamaModel">
+        <option value="qwen3-vl:8b">qwen3-vl:8b（推奨）</option>
+        <option value="qwen3-vl:4b">qwen3-vl:4b</option>
+        <option value="qwen3-vl:2b">qwen3-vl:2b</option>
+        <option value="gemma3:12b">gemma3:12b</option>
+        <option value="gemma3:4b">gemma3:4b</option>
+      </select>
+      <label for="ollamaEndpoint" style="margin-top:8px">エンドポイント:</label>
+      <input type="text" id="ollamaEndpoint" placeholder="http://localhost:11434">
+      <button id="ollamaInstallBtn" class="btn-secondary" style="display:none;margin-top:8px"></button>
+      <div id="ollamaProgress" style="display:none;margin-top:8px">
+        <div class="ollama-progress-bar">
+          <div id="ollamaProgressFill" class="ollama-progress-fill"></div>
+        </div>
+        <div id="ollamaProgressText" class="field-hint" style="margin-top:4px"></div>
+      </div>
+      <div id="ollamaDownloadHint" class="field-hint" style="display:none;margin-top:8px">
+        <a href="https://ollama.com/download" target="_blank">Ollama をダウンロード</a>してから起動してください
       </div>
     </div>
 
