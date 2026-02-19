@@ -414,7 +414,7 @@ function extractSafeErrorMessage(errBody) {
 async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model) {
   const { mimeType, base64Data } = parsed;
 
-  const modelName = model || 'gemini-3-pro-preview';
+  const modelName = model || 'gemini-3-flash-preview';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   const body = JSON.stringify({
     contents: [{
