@@ -322,7 +322,7 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
       .replace(/key=[^&\s"]+/gi, 'key=***')
       .replace(/sk-[^\s"]+/g, 'sk-***')
       .substring(0, 200);
-    return { error: `翻訳に失敗: ${safeMsg}` };
+    return { error: safeMsg };
   }
 }
 
@@ -621,7 +621,7 @@ let preloadTabId = null;       // 先読みリクエスト元のタブID
 let preloadTotal = 0;          // キュー全体の件数
 let preloadProcessed = 0;      // 処理済み件数
 const prefetchedImages = new Map(); // 先行fetch済み画像 Map<url, dataUrl>
-const PRELOAD_CONCURRENCY = 2;      // 並列翻訳数
+const PRELOAD_CONCURRENCY = 1;      // 並列翻訳数（Gemini無料枠15RPM対応のため直列）
 const PRELOAD_MAX_QUEUE = 50;       // キュー上限
 let preloadDebounceTimer = null;    // デバウンス用タイマー
 
@@ -682,9 +682,9 @@ async function processPreloadQueue() {
         }
       }
 
-      // リクエスト間ディレイ（初回以外）
+      // リクエスト間ディレイ（初回以外）: Gemini無料枠15RPM制限に対応（4200ms = 余裕を持って14RPM）
       if (batchIndex > 0) {
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 4200));
       }
 
       // バッチ内の各アイテムを並列実行
