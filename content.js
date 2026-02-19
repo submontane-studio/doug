@@ -66,6 +66,10 @@
       targetLang: 'ja',
     });
     const { ollamaModel: model, ollamaEndpoint: endpoint, targetLang } = settings;
+    // http/https スキームのみ許可（file:// 等によるローカルファイル読み取りを防ぐ）
+    if (!/^https?:\/\//i.test(endpoint)) {
+      throw new Error('Ollama エンドポイントは http:// または https:// で始まる必要があります。');
+    }
     const langName = OLLAMA_LANG_NAMES[targetLang] || targetLang;
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
     const prompt = `あなたはコミック翻訳の専門家です。この画像に含まれるすべてのテキストを検出・翻訳してください。
@@ -495,6 +499,13 @@ JSON配列のみ返してください:
   // ============================================================
   // オーバーレイ描画
   // ============================================================
+  // LLM が返す CSS 値から url() を除去してネットワーク要求を防ぐ
+  function sanitizeCssValue(value) {
+    if (typeof value !== 'string') return null;
+    if (/url\s*\(/i.test(value)) return null;
+    return value;
+  }
+
   // 背景色(CSS値)から少し暗くしたボーダー色を生成
   function darkenColor(cssValue) {
     // linear-gradient の場合、最初の色を抽出
@@ -583,7 +594,9 @@ JSON配列のみ返してください:
 
     layoutItems.forEach((item) => {
       const overlay = document.createElement('div');
-      overlay.className = `mut-overlay mut-type-${item.type || 'speech'}`;
+      // type を英数字・ハイフンのみに制限してクラス名インジェクションを防ぐ
+      const safeType = (item.type || 'speech').replace(/[^a-z0-9-]/gi, '') || 'speech';
+      overlay.className = `mut-overlay mut-type-${safeType}`;
       const { top, left, width, height } = item.layout;
       Object.assign(overlay.style, {
         position: 'absolute',
@@ -597,15 +610,18 @@ JSON配列のみ返してください:
       const textEl = document.createElement('div');
       textEl.className = 'mut-overlay-text';
       textEl.textContent = item.translated;
-      if (item.background) {
-        textEl.style.background = item.background;
+      // LLM 応答の CSS 値を sanitize（url() によるネットワーク要求を防ぐ）
+      const safeBg = sanitizeCssValue(item.background);
+      const safeBorder = sanitizeCssValue(item.border);
+      if (safeBg) {
+        textEl.style.background = safeBg;
         // 背景色からボーダー色を自動生成（少し暗くした色）
-        const borderColor = item.border || darkenColor(item.background);
+        const borderColor = safeBorder || darkenColor(safeBg);
         if (borderColor) {
           textEl.style.border = `2px solid ${borderColor}`;
         }
-      } else if (item.border) {
-        textEl.style.border = `2px solid ${item.border}`;
+      } else if (safeBorder) {
+        textEl.style.border = `2px solid ${safeBorder}`;
       }
       overlay.appendChild(textEl);
 

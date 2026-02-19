@@ -24,6 +24,10 @@ function updateProviderUI(provider) {
   }
 }
 
+function isValidOllamaEndpoint(url) {
+  return /^https?:\/\//i.test(url);
+}
+
 async function checkOllamaStatus() {
   if (isPulling) return;
   const endpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
@@ -36,6 +40,12 @@ async function checkOllamaStatus() {
   statusEl.className = 'ollama-status';
   installBtn.style.display = 'none';
   downloadHint.style.display = 'none';
+
+  if (!isValidOllamaEndpoint(endpoint)) {
+    statusEl.textContent = '⚠ エンドポイントは http:// または https:// で始まる必要があります';
+    statusEl.className = 'ollama-status err';
+    return;
+  }
 
   try {
     const res = await fetch(`${endpoint}/api/tags`);
@@ -75,6 +85,11 @@ async function pullModel() {
   const progressFill = $('ollamaProgressFill');
   const progressText = $('ollamaProgressText');
   const installBtn = $('ollamaInstallBtn');
+
+  if (!isValidOllamaEndpoint(endpoint)) {
+    showStatus('エンドポイントは http:// または https:// で始まる必要があります', 'err');
+    return;
+  }
 
   isPulling = true;
   installBtn.disabled = true;
@@ -191,13 +206,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
 
+    const ollamaEndpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
+    if (!isValidOllamaEndpoint(ollamaEndpoint)) {
+      showStatus('Ollama エンドポイントは http:// または https:// で始まる必要があります', 'err');
+      return;
+    }
+
     await chrome.storage.local.set({
       apiProvider: provider,
       geminiApiKey: $('geminiApiKey').value.trim(),
       claudeApiKey: $('claudeApiKey').value.trim(),
       openaiApiKey: $('openaiApiKey').value.trim(),
       ollamaModel: $('ollamaModel').value,
-      ollamaEndpoint: ($('ollamaEndpoint').value || 'http://localhost:11434').trim(),
+      ollamaEndpoint,
       targetLang: $('targetLang').value,
       prefetch: $('prefetch').checked,
     });

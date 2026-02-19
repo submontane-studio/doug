@@ -69,6 +69,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'FETCH_IMAGE') {
+    if (!isAllowedImageUrl(message.url)) {
+      sendResponse({ error: '許可されていない画像URLです' });
+      return false;
+    }
     fetchImageAsDataUrl(message.url)
       .then(imageData => sendResponse({ imageData }))
       .catch(err => sendResponse({ error: err.message }));
@@ -85,6 +89,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ============================================================
 // 画像fetch
 // ============================================================
+// FETCH_IMAGE で許可する画像ホスト（Marvel CDN と marvel.com サブドメインのみ）
+function isAllowedImageUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && (
+      u.hostname === 'i.annihil.us' ||
+      u.hostname === 'marvel.com' ||
+      u.hostname.endsWith('.marvel.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function fetchImageAsDataUrl(url) {
   let res;
   try {
@@ -107,7 +125,10 @@ async function fetchImageAsDataUrl(url) {
   }
 
   const base64 = btoa(chunks.join(''));
-  const contentType = res.headers.get('content-type') || 'image/jpeg';
+  // image/* MIME タイプのみ許可し、パラメータ・改行を除去してインジェクションを防ぐ
+  const rawContentType = res.headers.get('content-type') || 'image/jpeg';
+  const mimeMatch = rawContentType.match(/^image\/[a-zA-Z0-9.+-]{1,20}/);
+  const contentType = mimeMatch ? mimeMatch[0] : 'image/jpeg';
   return `data:${contentType};base64,${base64}`;
 }
 
@@ -296,7 +317,12 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
 
     return { translations };
   } catch (err) {
-    return { error: `翻訳に失敗: ${err.message}` };
+    // APIキー等の機密情報が含まれないようサニタイズしてから返す
+    const safeMsg = err.message
+      .replace(/key=[^&\s"]+/gi, 'key=***')
+      .replace(/sk-[^\s"]+/g, 'sk-***')
+      .substring(0, 200);
+    return { error: `翻訳に失敗: ${safeMsg}` };
   }
 }
 
