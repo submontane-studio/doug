@@ -383,16 +383,21 @@ async function fetchWithRetry(url, options, providerName) {
   let res;
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await fetch(url, options);
-    if (res.status !== 429) break;
+    if (res.status !== 429 && res.status !== 503) break;
     await res.text().catch(() => '');
     // Retry-After ヘッダーがあればそれを使用、なければ固定バックオフ
+    // 503（高負荷）は短めに待機、429（レート制限）は長めに待機
     const retryAfter = res.headers.get('Retry-After');
-    const wait = retryAfter ? (parseInt(retryAfter, 10) || 10) * 1000 : (attempt + 1) * 10000;
+    const baseWait = res.status === 503 ? 3000 : 10000;
+    const wait = retryAfter ? (parseInt(retryAfter, 10) || 10) * 1000 : (attempt + 1) * baseWait;
     await new Promise(r => setTimeout(r, wait));
   }
-  // 3回リトライしても429の場合、明示的なメッセージで通知
+  // 3回リトライしても失敗の場合、明示的なメッセージで通知
   if (res.status === 429) {
     throw new Error(`${providerName} APIがレート制限中です。しばらく時間をおいてから再度お試しください。`);
+  }
+  if (res.status === 503) {
+    throw new Error(`${providerName} APIが高負荷状態です。しばらく時間をおいてから再度お試しください。`);
   }
   return res;
 }
