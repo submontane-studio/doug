@@ -49,7 +49,7 @@ async function checkOllamaStatus() {
     if (!res.ok) throw new Error('接続エラー');
     const data = await res.json();
     const models = data.models || [];
-    // モデル名の前方一致で判定（:タグ違いも許容）
+    // モデル名の完全一致で判定
     const installed = models.some(m => m.name === model);
 
     if (installed) {

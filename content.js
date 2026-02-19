@@ -111,8 +111,8 @@ JSON配列のみ返してください:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt, images: [base64Data] }], stream: false }),
       });
-    } catch {
-      throw new Error('Ollama が起動していません。起動してから再試行してください。');
+    } catch (err) {
+      throw new Error(`Ollama への接続に失敗しました（${err.message}）。起動しているか・エンドポイント設定を確認してください。`);
     }
     if (res.status === 403) throw new Error('Ollama のアクセスが拒否されました (403)。OLLAMA_ORIGINS の設定が必要です。');
     if (res.status === 404) throw new Error(`モデル "${model}" がインストールされていません。設定画面でインストールしてください。`);
@@ -216,30 +216,24 @@ JSON配列のみ返してください:
   }
 
   function makeDraggable(el) {
-    let isDragging = false;
-    let startX, startY, origX, origY;
-
     el.addEventListener('mousedown', (e) => {
       if (e.target.closest('.mut-btn')) return;
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = el.getBoundingClientRect();
-      origX = rect.left;
-      origY = rect.top;
       e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      el.style.right = 'auto';
-      el.style.bottom = 'auto';
-      el.style.left = origX + (e.clientX - startX) + 'px';
-      el.style.top = origY + (e.clientY - startY) + 'px';
-    });
-
-    document.addEventListener('mouseup', () => {
-      isDragging = false;
+      const rect = el.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const origX = rect.left, origY = rect.top;
+      const onMove = (e) => {
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+        el.style.left = origX + (e.clientX - startX) + 'px';
+        el.style.top = origY + (e.clientY - startY) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     });
   }
 
@@ -329,7 +323,6 @@ JSON配列のみ返してください:
   }
 
   function getOverlayTarget(info) {
-    if (info.type === 'svg') return info.element;
     return info.element;
   }
 
@@ -426,7 +419,8 @@ JSON配列のみ返してください:
   const perfObserver = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.name.includes('/digitalcomic/') && entry.name.includes('/jpg_75/') && !entry.name.includes('/thumbnails/')) {
-        try { var p = new URL(entry.name).pathname; } catch { var p = entry.name.split('?')[0]; }
+        let p;
+        try { p = new URL(entry.name).pathname; } catch { p = entry.name.split('?')[0]; }
         if (!comicPageUrls.has(p)) comicPageUrls.set(p, entry.name);
       }
     }
@@ -554,32 +548,37 @@ JSON配列のみ返してください:
         return { ...item, layout: { top, left, width: bboxW, height: bboxH } };
       });
 
-    // 重なり検出：垂直方向に重なる場合、上下を縮小（O(n²)のため50件で打ち切り）
+    // 重なり検出：垂直方向に重なる場合、上下を縮小（O(n²)のため50件で打ち切り、最大3パス）
     const overlapLimit = Math.min(layoutItems.length, 50);
-    for (let i = 0; i < overlapLimit; i++) {
-      for (let j = i + 1; j < overlapLimit; j++) {
-        const a = layoutItems[i].layout;
-        const b = layoutItems[j].layout;
-        // 水平方向に重なりがあるか
-        const hOverlap = a.left < b.left + b.width && a.left + a.width > b.left;
-        if (!hOverlap) continue;
-        // 垂直方向の重なり量
-        const aBottom = a.top + a.height;
-        const bBottom = b.top + b.height;
-        const vOverlap = Math.min(aBottom, bBottom) - Math.max(a.top, b.top);
-        if (vOverlap <= 0) continue;
-        // 重なりを半分ずつ縮小
-        const half = vOverlap / 2 + 0.3; // 0.3%の余白
-        if (a.top < b.top) {
-          a.height -= half;
-          b.top += half;
-          b.height -= half;
-        } else {
-          b.height -= half;
-          a.top += half;
-          a.height -= half;
+    for (let pass = 0; pass < 3; pass++) {
+      let hadOverlap = false;
+      for (let i = 0; i < overlapLimit; i++) {
+        for (let j = i + 1; j < overlapLimit; j++) {
+          const a = layoutItems[i].layout;
+          const b = layoutItems[j].layout;
+          // 水平方向に重なりがあるか
+          const hOverlap = a.left < b.left + b.width && a.left + a.width > b.left;
+          if (!hOverlap) continue;
+          // 垂直方向の重なり量
+          const aBottom = a.top + a.height;
+          const bBottom = b.top + b.height;
+          const vOverlap = Math.min(aBottom, bBottom) - Math.max(a.top, b.top);
+          if (vOverlap <= 0) continue;
+          hadOverlap = true;
+          // 重なりを半分ずつ縮小
+          const half = vOverlap / 2 + 0.3; // 0.3%の余白
+          if (a.top < b.top) {
+            a.height -= half;
+            b.top += half;
+            b.height -= half;
+          } else {
+            b.height -= half;
+            a.top += half;
+            a.height -= half;
+          }
         }
       }
+      if (!hadOverlap) break;
     }
 
     layoutItems.forEach((item) => {
@@ -714,14 +713,16 @@ JSON配列のみ返してください:
       item.textEl.style.fontSize = relaxed + 'px';
     }
 
-    // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大
+    // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大（%単位で指定してレスポンシブを維持）
+    const cW = overlayContainer.clientWidth || 1;
+    const cH = overlayContainer.clientHeight || 1;
     for (const item of items) {
       if (item.fontSize <= 6) {
         if (item.textEl.scrollHeight > item.boxH + 1) {
-          item.overlay.style.height = (item.textEl.scrollHeight + 8) + 'px';
+          item.overlay.style.height = ((item.textEl.scrollHeight + 8) / cH * 100) + '%';
         }
         if (item.textEl.scrollWidth > item.boxW + 1) {
-          item.overlay.style.width = (item.textEl.scrollWidth + 8) + 'px';
+          item.overlay.style.width = ((item.textEl.scrollWidth + 8) / cW * 100) + '%';
         }
       }
     }

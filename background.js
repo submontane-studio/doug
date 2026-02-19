@@ -391,7 +391,7 @@ function extractSafeErrorMessage(errBody) {
 async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model) {
   const { mimeType, base64Data } = parsed;
 
-  const modelName = model || 'gemini-3-flash-preview';
+  const modelName = model || 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   const body = JSON.stringify({
     contents: [{
@@ -437,7 +437,7 @@ async function translateImageWithClaude(apiKey, parsed, prompt, imageDims) {
 
   const url = 'https://api.anthropic.com/v1/messages';
   const body = JSON.stringify({
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'claude-sonnet-4-6',
     max_tokens: 8000,
     messages: [{
       role: 'user',
@@ -609,7 +609,6 @@ async function handlePreloadQueue(imageUrls, tabId) {
   }
   // キュー上限を超えるURLは切り捨て
   const clampedUrls = imageUrls.slice(0, PRELOAD_MAX_QUEUE);
-  console.log(`[Doug preload] キュー受信: ${clampedUrls.length}件`, clampedUrls.map(u => u.split('/').pop()?.split('?')[0]));
   // デバウンス: 短時間の連続呼び出しを抑制（最後の呼び出しから500ms後に実行）
   clearTimeout(preloadDebounceTimer);
   preloadDebounceTimer = setTimeout(() => {
@@ -683,13 +682,10 @@ async function processPreloadItem(url, settings) {
     // キャッシュ済みならスキップ（進捗は進める）
     const existing = await getCachedTranslation(url, settings.targetLang);
     if (existing) {
-      console.log(`[Doug preload] キャッシュHIT: ${shortUrl}`);
       preloadProcessed++;
       sendPreloadProgress('active');
       return;
     }
-
-    console.log(`[Doug preload] キャッシュMISS → 翻訳開始: ${shortUrl}`);
 
     // 先行fetch済みの画像があればそれを使う、なければfetch
     let imageData;
