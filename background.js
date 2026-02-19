@@ -286,10 +286,7 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
 
   try {
     let translations;
-    // 先読み時かつGeminiの場合、軽量モデルを使用
-    const prefetchModel = (options?.prefetch && provider === 'gemini')
-      ? 'gemini-2.0-flash-lite'
-      : undefined;
+    const prefetchModel = undefined;
 
     // parseは1回だけ実行して各API関数に渡す
     const parsed = parseImageDataUrl(imageData);
