@@ -716,17 +716,22 @@ JSON配列のみ返してください:
       items.push({ overlay, textEl, boxW, boxH, fontSize });
     });
 
-    // フェーズ2: 読み取り→書き込みを要素ごとに縮小（バッチ化で最小限のリフロー）
+    // フェーズ2: 二分探索でフォントサイズを決定（線形探索比で試行回数を大幅削減）
     for (const item of items) {
-      for (let i = 0; i < 30; i++) {
-        if (item.textEl.scrollWidth <= item.boxW + 1 && item.textEl.scrollHeight <= item.boxH + 1) break;
-        item.fontSize -= 0.3;
-        if (item.fontSize < 5) break;
-        item.textEl.style.fontSize = item.fontSize + 'px';
+      let lo = 5, hi = item.fontSize, best = 5;
+      while (hi - lo > 0.3) {
+        const mid = (lo + hi) / 2;
+        item.textEl.style.fontSize = mid + 'px';
+        if (item.textEl.scrollWidth <= item.boxW + 1 && item.textEl.scrollHeight <= item.boxH + 1) {
+          best = mid;
+          lo = mid;
+        } else {
+          hi = mid;
+        }
       }
+      item.fontSize = best;
       // フィット後に30%縮小して余裕を確保
-      const relaxed = Math.max(item.fontSize * 0.70, 5);
-      item.textEl.style.fontSize = relaxed + 'px';
+      item.textEl.style.fontSize = Math.max(best * 0.70, 5) + 'px';
     }
 
     // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大（%単位で指定してレスポンシブを維持）
