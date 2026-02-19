@@ -746,7 +746,7 @@ JSON配列のみ返してください:
       item.textEl.style.whiteSpace = 'nowrap';
       const naturalW = item.textEl.scrollWidth;
       item.textEl.style.whiteSpace = '';
-      if (naturalW > item.boxW * 2) {
+      if (naturalW > item.boxW * 1.5) {
         const targetW = Math.min(naturalW + 10, cW * 0.38);
         item.overlay.style.width = (targetW / cW * 100) + '%';
       }
