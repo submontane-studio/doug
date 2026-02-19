@@ -729,7 +729,7 @@ JSON配列のみ返してください:
       item.textEl.style.fontSize = relaxed + 'px';
     }
 
-    // フェーズ3: 最小フォントでも収まらない場合、ボックスを拡大（%単位で指定してレスポンシブを維持）
+    // フェーズ3: 最小フォントでも収まらない場合 / 折り返し過多の場合にボックスを拡大
     const cW = overlayContainer.clientWidth || 1;
     const cH = overlayContainer.clientHeight || 1;
     for (const item of items) {
@@ -740,6 +740,15 @@ JSON配列のみ返してください:
         if (item.textEl.scrollWidth > item.boxW + 1) {
           item.overlay.style.width = ((item.textEl.scrollWidth + 8) / cW * 100) + '%';
         }
+      }
+      // 折り返し過多チェック: 1行に伸ばしたときの自然幅がボックスの2倍を超える場合は幅を広げる
+      // （日本語は英語より文字幅が大きく、狭いボックスで多段折り返しになりやすいため）
+      item.textEl.style.whiteSpace = 'nowrap';
+      const naturalW = item.textEl.scrollWidth;
+      item.textEl.style.whiteSpace = '';
+      if (naturalW > item.boxW * 2) {
+        const targetW = Math.min(naturalW + 10, cW * 0.38);
+        item.overlay.style.width = (targetW / cW * 100) + '%';
       }
     }
   }
