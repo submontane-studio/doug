@@ -514,10 +514,14 @@ JSON配列のみ返してください:
     const gradMatch = cssValue.match(/#[0-9a-fA-F]{3,8}/);
     const hex = gradMatch ? gradMatch[0] : null;
     if (!hex) return null;
+    // 3文字HEX（#abc）を6文字（#aabbcc）に展開
+    const hex6 = hex.length === 4
+      ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+      : hex;
     // hex → RGB → 30%暗く → hex
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
+    const r = parseInt(hex6.slice(1, 3), 16);
+    const g = parseInt(hex6.slice(3, 5), 16);
+    const b = parseInt(hex6.slice(5, 7), 16);
     if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
     const d = (v) => Math.round(v * 0.7).toString(16).padStart(2, '0');
     return `#${d(r)}${d(g)}${d(b)}`;
@@ -878,6 +882,7 @@ JSON配列のみ返してください:
       if (href && href !== lastPageHref) {
         lastPageHref = href;
         clearOverlays();
+        isTranslating = false; // ページ遷移時に翻訳中フラグをリセット
         // 先読みは翻訳完了後にトリガーするためここでは起動しない
       }
     });

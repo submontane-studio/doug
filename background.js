@@ -389,7 +389,8 @@ async function fetchWithRetry(url, options, providerName) {
     // 503（高負荷）は短めに待機、429（レート制限）は長めに待機
     const retryAfter = res.headers.get('Retry-After');
     const baseWait = res.status === 503 ? 3000 : 10000;
-    const wait = retryAfter ? (parseInt(retryAfter, 10) || 10) * 1000 : (attempt + 1) * baseWait;
+    const retryAfterSec = Math.min(parseInt(retryAfter, 10) || 0, 60); // 上限60秒
+    const wait = retryAfterSec > 0 ? retryAfterSec * 1000 : (attempt + 1) * baseWait;
     await new Promise(r => setTimeout(r, wait));
   }
   // 3回リトライしても失敗の場合、明示的なメッセージで通知
@@ -649,6 +650,7 @@ async function handlePreloadQueue(imageUrls, tabId) {
     sendPreloadProgress('active');
     // 処理ループ未実行なら開始（実行中なら既存ループが新キューを処理）
     if (!preloadProcessing) {
+      preloadProcessing = true; // 二重起動を確実に防ぐため呼び出し前にセット
       processPreloadQueue();
     }
   }, 500);
@@ -698,6 +700,7 @@ async function processPreloadQueue() {
 
   } finally {
     prefetchedImages.clear();
+    preloadProcessed = preloadTotal; // キュー置換によるカウントズレを補正して必ず100%で終了
     sendPreloadProgress('done');
     preloadProcessing = false;
   }
