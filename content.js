@@ -391,6 +391,8 @@ JSON配列のみ返してください:
         ? `${response.translations.length}件のテキストを表示しました（キャッシュ）`
         : `${response.translations.length}件のテキストを翻訳しました`;
       showNotification(message, 'success');
+      // 翻訳・表示完了後に先読みをトリガー（現在ページのAPI処理が終わってから）
+      triggerPrefetch(imageUrl);
     } catch (err) {
       showNotification('翻訳に失敗: ' + err.message, 'error');
     } finally {
@@ -865,11 +867,10 @@ JSON配列のみ返してください:
     if (!svgImage) return;
     watchedImage = svgImage;
 
-    // 初回チェック
+    // 初回チェック（先読みは翻訳完了後にトリガーするためここでは href 記録のみ）
     const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
     if (href && href !== lastPageHref) {
       lastPageHref = href;
-      triggerPrefetch(href);
     }
 
     pageObserver = new MutationObserver(() => {
@@ -877,7 +878,7 @@ JSON配列のみ返してください:
       if (href && href !== lastPageHref) {
         lastPageHref = href;
         clearOverlays();
-        triggerPrefetch(href);
+        // 先読みは翻訳完了後にトリガーするためここでは起動しない
       }
     });
     pageObserver.observe(svgImage, {
@@ -903,12 +904,6 @@ JSON配列のみ返してください:
     if (dialog) {
       moveUIToReader();
       startPageWatcher();
-      // ダイアログopen直後に初回先読みをトリガー
-      const svgImage = dialog.querySelector('.rocket-reader image.pageImage');
-      if (svgImage) {
-        const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
-        if (href) triggerPrefetch(href);
-      }
     } else {
       stopPageWatcher();
       if (toolbar && toolbar.parentElement !== document.body) {
