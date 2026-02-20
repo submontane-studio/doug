@@ -569,6 +569,23 @@ JSON配列のみ返してください:
   }
 
   // 背景色(CSS値)から少し暗くしたボーダー色を生成
+  // 背景色から適切なテキスト色（白 or 黒）を返す
+  function getContrastColor(cssValue) {
+    const match = cssValue.match(/#[0-9a-fA-F]{3,8}/);
+    if (!match) return null;
+    const hex = match[0];
+    const hex6 = hex.length === 4
+      ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+      : hex;
+    const r = parseInt(hex6.slice(1, 3), 16);
+    const g = parseInt(hex6.slice(3, 5), 16);
+    const b = parseInt(hex6.slice(5, 7), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    // WCAG相対輝度（0.299/0.587/0.114 近似）
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+    return luminance < 128 ? 'white' : 'black';
+  }
+
   function darkenColor(cssValue) {
     // linear-gradient の場合、最初の色を抽出
     const gradMatch = cssValue.match(/#[0-9a-fA-F]{3,8}/);
@@ -689,6 +706,9 @@ JSON配列のみ返してください:
       const safeBorder = sanitizeCssValue(item.border);
       if (safeBg) {
         textEl.style.background = safeBg;
+        // 背景色のコントラストに応じてテキスト色を設定（黒背景→白文字）
+        const contrastColor = getContrastColor(safeBg);
+        if (contrastColor) textEl.style.color = contrastColor;
         // 背景色からボーダー色を自動生成（少し暗くした色）
         const borderColor = safeBorder || darkenColor(safeBg);
         if (borderColor) {
