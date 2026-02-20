@@ -2,7 +2,7 @@
 
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日
 const CACHE_VERSION = '1.1';
-const MARVEL_URL_RE = /^https:\/\/[^/]*\.marvel\.com(\/|$)/;
+const ALLOWED_SITES_RE = /^https:\/\/([^/]*\.marvel\.com|[^/]*\.amazon\.co\.jp|[^/]*\.amazon\.com)(\/|$)/;
 
 // ============================================================
 // マイグレーション: sync → local への移行
@@ -35,7 +35,7 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'translate') return;
   const sender = port.sender;
   if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
-  if (sender.tab && !MARVEL_URL_RE.test(sender.tab.url || '')) { port.disconnect(); return; }
+  if (sender.tab && !ALLOWED_SITES_RE.test(sender.tab.url || '')) { port.disconnect(); return; }
 
   port.onMessage.addListener(async (message) => {
     if (message.type !== 'TRANSLATE_IMAGE') return;
@@ -58,7 +58,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ error: '不正な送信元です' });
     return false;
   }
-  if (sender.tab && !MARVEL_URL_RE.test(sender.tab.url || '')) {
+  if (sender.tab && !ALLOWED_SITES_RE.test(sender.tab.url || '')) {
     sendResponse({ error: '不正な送信元です' });
     return false;
   }
