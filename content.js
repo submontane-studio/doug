@@ -413,7 +413,9 @@ JSON配列のみ返してください:
       }
 
       if (fill) fill.style.width = '90%';
-      renderOverlays(getOverlayTarget(comicInfo), response.translations);
+      const adjustments = imageUrl ? await loadAdjustments(imageUrl) : {};
+      const onAdjusted = imageUrl ? (idx, style) => saveAdjustment(imageUrl, idx, style) : null;
+      renderOverlays(getOverlayTarget(comicInfo), response.translations, adjustments, onAdjusted);
       showExtraButtons();
 
       const message = response.fromCache
@@ -528,6 +530,35 @@ JSON配列のみ返してください:
   }
 
   // ============================================================
+  // 吹き出し位置・サイズ調整値の保存・復元
+  // ============================================================
+  async function getAdjKey(imageUrl) {
+    if (!imageUrl) return null;
+    let normalized;
+    try { const u = new URL(imageUrl); normalized = u.origin + u.pathname; }
+    catch { normalized = imageUrl.split('?')[0]; }
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized));
+    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `adj:${hex.substring(0, 32)}`;
+  }
+
+  async function loadAdjustments(imageUrl) {
+    const key = await getAdjKey(imageUrl);
+    if (!key) return {};
+    const result = await chrome.storage.local.get(key);
+    return result[key] || {};
+  }
+
+  async function saveAdjustment(imageUrl, index, style) {
+    const key = await getAdjKey(imageUrl);
+    if (!key) return;
+    const result = await chrome.storage.local.get(key);
+    const adjs = result[key] || {};
+    adjs[index] = style;
+    await chrome.storage.local.set({ [key]: adjs });
+  }
+
+  // ============================================================
   // オーバーレイ描画
   // ============================================================
   // LLM が返す CSS 値から url() を除去してネットワーク要求を防ぐ
@@ -556,7 +587,7 @@ JSON配列のみ返してください:
     return `#${d(r)}${d(g)}${d(b)}`;
   }
 
-  function renderOverlays(targetEl, translations) {
+  function renderOverlays(targetEl, translations, adjustments = {}, onAdjusted = null) {
     if (!targetEl || !translations) return;
     clearOverlays();
     const rect = targetEl.getBoundingClientRect();
@@ -627,7 +658,7 @@ JSON配列のみ返してください:
       if (!hadOverlap) break;
     }
 
-    layoutItems.forEach((item) => {
+    layoutItems.forEach((item, index) => {
       const overlay = document.createElement('div');
       // type を英数字・ハイフンのみに制限してクラス名インジェクションを防ぐ
       const safeType = (item.type || 'speech').replace(/[^a-z0-9-]/gi, '') || 'speech';
@@ -641,6 +672,14 @@ JSON配列のみ返してください:
         height: height + '%',
         pointerEvents: 'auto',
       });
+      // 保存済み調整値があれば上書き適用
+      const adj = adjustments[index];
+      if (adj) {
+        if (adj.top != null)    overlay.style.top    = adj.top;
+        if (adj.left != null)   overlay.style.left   = adj.left;
+        if (adj.width != null)  overlay.style.width  = adj.width;
+        if (adj.height != null) overlay.style.height = adj.height;
+      }
 
       const textEl = document.createElement('div');
       textEl.className = 'mut-overlay-text';
@@ -669,7 +708,7 @@ JSON配列のみ返してください:
       resizeHandle.className = 'mut-resize-handle';
       overlay.appendChild(resizeHandle);
 
-      makeDraggableResizable(overlay, resizeHandle);
+      makeDraggableResizable(overlay, resizeHandle, index, onAdjusted);
       overlayContainer.appendChild(overlay);
     });
 
@@ -680,7 +719,7 @@ JSON配列のみ返してください:
     observePosition(targetEl);
   }
 
-  function makeDraggableResizable(overlay, resizeHandle) {
+  function makeDraggableResizable(overlay, resizeHandle, index = 0, onAdjusted = null) {
     const getContainerRect = () => overlayContainer.getBoundingClientRect();
 
     // ドラッグで移動
@@ -701,6 +740,10 @@ JSON配列のみ返してください:
         delete overlay.dataset.dragging;
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        if (onAdjusted) onAdjusted(index, {
+          top: overlay.style.top, left: overlay.style.left,
+          width: overlay.style.width, height: overlay.style.height,
+        });
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
@@ -722,6 +765,10 @@ JSON配列のみ返してください:
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         requestAnimationFrame(() => fitAllOverlayText());
+        if (onAdjusted) onAdjusted(index, {
+          top: overlay.style.top, left: overlay.style.left,
+          width: overlay.style.width, height: overlay.style.height,
+        });
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
