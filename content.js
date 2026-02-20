@@ -142,7 +142,7 @@ JSON配列のみ返してください:
       // Service Worker が 30 秒でスリープするのを防ぐため 10 秒ごとに ping
       const keepAliveId = setInterval(() => {
         try { chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {}); }
-        catch { clearInterval(keepAliveId); }
+        catch { clearInterval(keepAliveId); handleContextInvalidated(); }
       }, 10000);
       port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl });
       port.onMessage.addListener((response) => {
@@ -905,6 +905,14 @@ JSON配列のみ返してください:
   // ============================================================
   // 通知
   // ============================================================
+  let contextInvalidatedShown = false;
+  function handleContextInvalidated() {
+    if (contextInvalidatedShown) return;
+    contextInvalidatedShown = true;
+    stopPrefetchKeepAlive();
+    showNotification('拡張機能が更新されました。ページを再読み込みしてください。', 'error');
+  }
+
   function showNotification(message, type = 'info') {
     let notif = document.getElementById('mut-notification');
     if (!notif) {
@@ -1039,7 +1047,7 @@ JSON配列のみ返してください:
     if (prefetchKeepAliveId) return;
     prefetchKeepAliveId = setInterval(() => {
       try { chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {}); }
-      catch { stopPrefetchKeepAlive(); }
+      catch { stopPrefetchKeepAlive(); handleContextInvalidated(); }
     }, 10000);
     // 安全弁: 5分後に強制停止
     prefetchKeepAliveTimeout = setTimeout(stopPrefetchKeepAlive, 5 * 60 * 1000);
