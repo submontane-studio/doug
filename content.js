@@ -141,7 +141,8 @@ JSON配列のみ返してください:
       const port = chrome.runtime.connect({ name: 'translate' });
       // Service Worker が 30 秒でスリープするのを防ぐため 10 秒ごとに ping
       const keepAliveId = setInterval(() => {
-        chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {});
+        try { chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {}); }
+        catch { clearInterval(keepAliveId); }
       }, 10000);
       port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl });
       port.onMessage.addListener((response) => {
@@ -543,19 +544,23 @@ JSON配列のみ返してください:
   }
 
   async function loadAdjustments(imageUrl) {
-    const key = await getAdjKey(imageUrl);
-    if (!key) return {};
-    const result = await chrome.storage.local.get(key);
-    return result[key] || {};
+    try {
+      const key = await getAdjKey(imageUrl);
+      if (!key) return {};
+      const result = await chrome.storage.local.get(key);
+      return result[key] || {};
+    } catch { return {}; }
   }
 
   async function saveAdjustment(imageUrl, index, style) {
-    const key = await getAdjKey(imageUrl);
-    if (!key) return;
-    const result = await chrome.storage.local.get(key);
-    const adjs = result[key] || {};
-    adjs[index] = style;
-    await chrome.storage.local.set({ [key]: adjs });
+    try {
+      const key = await getAdjKey(imageUrl);
+      if (!key) return;
+      const result = await chrome.storage.local.get(key);
+      const adjs = result[key] || {};
+      adjs[index] = style;
+      await chrome.storage.local.set({ [key]: adjs });
+    } catch { /* context invalidated 等は無視 */ }
   }
 
   // ============================================================
@@ -1033,7 +1038,8 @@ JSON配列のみ返してください:
   function startPrefetchKeepAlive() {
     if (prefetchKeepAliveId) return;
     prefetchKeepAliveId = setInterval(() => {
-      chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {});
+      try { chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {}); }
+      catch { stopPrefetchKeepAlive(); }
     }, 10000);
     // 安全弁: 5分後に強制停止
     prefetchKeepAliveTimeout = setTimeout(stopPrefetchKeepAlive, 5 * 60 * 1000);
