@@ -764,13 +764,15 @@ function parseVisionResponse(geminiResponse, imageDims) {
   const imgW = imageDims?.width || 1000;
   const imgH = imageDims?.height || 1500;
 
+  // LLM出力のJSON修復:
+  // 1. 制御文字を空白に正規化（生改行・タブ等）
+  // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
+  // catchブロックで診断ログに使うためtryブロック外で宣言
+  const sanitized = jsonMatch[0]
+    .replace(/[\x00-\x1F\x7F]+/g, ' ')
+    .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
+
   try {
-    // LLM出力のJSON修復:
-    // 1. 制御文字を空白に正規化（生改行・タブ等）
-    // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
-    const sanitized = jsonMatch[0]
-      .replace(/[\x00-\x1F\x7F]+/g, ' ')
-      .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
     const results = JSON.parse(sanitized);
     if (!Array.isArray(results)) return [];
 
