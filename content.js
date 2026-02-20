@@ -936,27 +936,8 @@ JSON配列のみ返してください:
   // ============================================================
   // UI配置
   // ============================================================
-  let cachedUIParent = null;
-
   function getUIParent() {
-    if (cachedUIParent && cachedUIParent.isConnected) return cachedUIParent;
-    cachedUIParent = document.querySelector('dialog.ComicPurchasePaths__Reader[open]') || document.body;
-    return cachedUIParent;
-  }
-
-  function moveUIToReader() {
-    const dialog = document.querySelector('dialog.ComicPurchasePaths__Reader[open]');
-    if (!dialog) return;
-    if (toolbar && toolbar.parentElement !== dialog) dialog.appendChild(toolbar);
-    if (overlayContainer && overlayContainer.parentElement !== dialog) dialog.appendChild(overlayContainer);
-    const bar = document.getElementById('mut-prefetch-bar');
-    if (bar && bar.parentElement !== dialog) dialog.appendChild(bar);
-  }
-
-  function moveUIToBody() {
-    if (toolbar && toolbar.parentElement !== document.body) document.body.appendChild(toolbar);
-    const bar = document.getElementById('mut-prefetch-bar');
-    if (bar && bar.parentElement !== document.body) document.body.appendChild(bar);
+    return document.body;
   }
 
   // ============================================================
@@ -964,7 +945,6 @@ JSON配列のみ返してください:
   // ============================================================
   function init() {
     createToolbar();
-    moveUIToReader();
   }
 
   if (document.readyState === 'loading') {
@@ -1013,34 +993,6 @@ JSON配列のみ返してください:
     }
     lastPageHref = '';
     lastQueueKey = '';
-  }
-
-  // dialog の開閉を監視
-  const dialogObserver = new MutationObserver(() => {
-    cachedUIParent = null; // dialog状態変更時にキャッシュ無効化
-    const dialog = document.querySelector('dialog.ComicPurchasePaths__Reader[open]');
-    if (dialog) {
-      moveUIToReader();
-      startPageWatcher();
-    } else {
-      stopPageWatcher();
-      if (toolbar && toolbar.parentElement !== document.body) {
-        moveUIToBody();
-        clearOverlays();
-      }
-    }
-  });
-  // dialogのopen属性変更と追加/削除を監視
-  dialogObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['open'],
-  });
-
-  // 初回: リーダーが既に開いていれば監視開始
-  if (document.querySelector('dialog.ComicPurchasePaths__Reader[open]')) {
-    startPageWatcher();
   }
 
   // 先読み中のService Worker Keepalive（4.2秒待機中のスリープ防止）
