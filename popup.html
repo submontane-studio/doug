@@ -29,6 +29,14 @@
       <div class="field-hint">
         <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">APIキーを取得</a>（無料枠あり）
       </div>
+      <label for="geminiModel" style="margin-top:8px">モデル:</label>
+      <select id="geminiModel">
+        <option value="gemini-2.5-pro-preview">gemini-2.5-pro-preview（最高品質）</option>
+        <option value="gemini-2.5-flash-preview">gemini-2.5-flash-preview（バランス）</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（高速）</option>
+        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+        <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+      </select>
     </div>
 
     <div class="section api-key-section" id="claudeKeySection" style="display:none">
@@ -40,6 +48,12 @@
       <div class="field-hint">
         <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">APIキーを取得</a>
       </div>
+      <label for="claudeModel" style="margin-top:8px">モデル:</label>
+      <select id="claudeModel">
+        <option value="claude-opus-4-6">claude-opus-4-6（最高品質）</option>
+        <option value="claude-sonnet-4-6">claude-sonnet-4-6（推奨）</option>
+        <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001（高速）</option>
+      </select>
     </div>
 
     <div class="section api-key-section" id="openaiKeySection" style="display:none">
@@ -51,6 +65,11 @@
       <div class="field-hint">
         <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">APIキーを取得</a>
       </div>
+      <label for="openaiModel" style="margin-top:8px">モデル:</label>
+      <select id="openaiModel">
+        <option value="gpt-5.2-2025-12-11">GPT-5.2</option>
+        <option value="gpt-5.2-pro-2025-12-11">GPT-5.2 Pro</option>
+      </select>
     </div>
 
     <div class="section api-key-section" id="ollamaSection" style="display:none">
