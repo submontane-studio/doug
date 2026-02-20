@@ -140,6 +140,9 @@ const SETTINGS_DEFAULTS = {
   geminiApiKey: '',
   claudeApiKey: '',
   openaiApiKey: '',
+  geminiModel: 'gemini-2.5-flash-lite',
+  claudeModel: 'claude-sonnet-4-6',
+  openaiModel: 'gpt-5.2-2025-12-11',
   ollamaModel: 'qwen3-vl:8b',
   ollamaEndpoint: 'http://localhost:11434',
   targetLang: 'ja',
@@ -286,7 +289,6 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
 
   try {
     let translations;
-    const prefetchModel = undefined;
 
     // parseは1回だけ実行して各API関数に渡す
     const parsed = parseImageDataUrl(imageData);
@@ -301,11 +303,11 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
         imageDims
       );
     } else if (provider === 'claude') {
-      translations = await translateImageWithClaude(apiKey, parsed, prompt, imageDims);
+      translations = await translateImageWithClaude(apiKey, parsed, prompt, imageDims, settings.claudeModel);
     } else if (provider === 'openai') {
-      translations = await translateImageWithOpenAI(apiKey, imageData, prompt, imageDims);
+      translations = await translateImageWithOpenAI(apiKey, imageData, prompt, imageDims, settings.openaiModel);
     } else {
-      translations = await translateImageWithGemini(apiKey, parsed, prompt, imageDims, prefetchModel);
+      translations = await translateImageWithGemini(apiKey, parsed, prompt, imageDims, settings.geminiModel);
     }
 
     if (translations.length > 0 && imageUrl) {
@@ -420,7 +422,7 @@ function extractSafeErrorMessage(errBody) {
 async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model) {
   const { mimeType, base64Data } = parsed;
 
-  const modelName = model || 'gemini-3-flash-preview';
+  const modelName = model || 'gemini-2.5-flash-lite';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   const body = JSON.stringify({
     contents: [{
@@ -461,12 +463,12 @@ async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model
 // ============================================================
 // Claude (Anthropic) API
 // ============================================================
-async function translateImageWithClaude(apiKey, parsed, prompt, imageDims) {
+async function translateImageWithClaude(apiKey, parsed, prompt, imageDims, model) {
   const { mimeType, base64Data } = parsed;
 
   const url = 'https://api.anthropic.com/v1/messages';
   const body = JSON.stringify({
-    model: 'claude-sonnet-4-6',
+    model: model || 'claude-sonnet-4-6',
     max_tokens: 8000,
     messages: [{
       role: 'user',
@@ -515,11 +517,11 @@ async function translateImageWithClaude(apiKey, parsed, prompt, imageDims) {
 // ============================================================
 // OpenAI (ChatGPT) API
 // ============================================================
-async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims) {
+async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims, model) {
 
   const url = 'https://api.openai.com/v1/chat/completions';
   const body = JSON.stringify({
-    model: 'gpt-4o',
+    model: model || 'gpt-5.2-2025-12-11',
     max_tokens: 8000,
     messages: [{
       role: 'user',
@@ -817,6 +819,11 @@ function parseVisionResponse(geminiResponse, imageDims) {
       });
   } catch (err) {
     console.error('[Doug bg] Vision応答のパースに失敗:', err);
+    // 失敗箇所を特定するための診断ログ
+    const pos = parseInt(err.message?.match(/position (\d+)/)?.[1] || '0', 10);
+    if (pos > 0) {
+      console.error('[Doug bg] 問題箇所 (前後50文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 50), pos + 50)));
+    }
     return [];
   }
 }
