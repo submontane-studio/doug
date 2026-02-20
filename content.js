@@ -959,6 +959,26 @@ JSON配列のみ返してください:
     startPageWatcher();
   }
 
+  // 先読み中のService Worker Keepalive（4.2秒待機中のスリープ防止）
+  let prefetchKeepAliveId = null;
+  let prefetchKeepAliveTimeout = null;
+
+  function startPrefetchKeepAlive() {
+    if (prefetchKeepAliveId) return;
+    prefetchKeepAliveId = setInterval(() => {
+      chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {});
+    }, 10000);
+    // 安全弁: 5分後に強制停止
+    prefetchKeepAliveTimeout = setTimeout(stopPrefetchKeepAlive, 5 * 60 * 1000);
+  }
+
+  function stopPrefetchKeepAlive() {
+    clearInterval(prefetchKeepAliveId);
+    clearTimeout(prefetchKeepAliveTimeout);
+    prefetchKeepAliveId = null;
+    prefetchKeepAliveTimeout = null;
+  }
+
   // 先読み進捗の受信
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'PRELOAD_PROGRESS') {
@@ -970,6 +990,7 @@ JSON配列のみ返してください:
       if (total <= 0) return;
 
       if (state === 'active') {
+        startPrefetchKeepAlive();
         fill.style.background = '';  // 白（CSS既定）に戻す
         bar.style.display = '';
         bar.style.opacity = '';
@@ -979,6 +1000,7 @@ JSON配列のみ返してください:
       }
 
       if (state === 'done') {
+        stopPrefetchKeepAlive();
         fill.style.width = '100%';
         bar.classList.remove('mut-prefetch-active');
         setTimeout(() => {
