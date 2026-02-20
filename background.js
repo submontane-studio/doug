@@ -182,6 +182,11 @@ function normalizeImageUrl(url) {
   }
 }
 
+// Blob URL（Kindle等）はセッションのみ保存（セッション終了で自動破棄）
+function isSessionOnlyUrl(url) {
+  return typeof url === 'string' && url.startsWith('blob:');
+}
+
 async function generateCacheKey(imageUrl, targetLang) {
   if (!imageUrl) throw new Error('imageUrl is required');
   // トークン等を除去したURLでハッシュ生成（先読みと通常翻訳でキャッシュを共有）
@@ -197,14 +202,16 @@ async function generateCacheKey(imageUrl, targetLang) {
 async function getCachedTranslation(imageUrl, targetLang) {
   const cacheKey = await generateCacheKey(imageUrl, targetLang);
   try {
-    const result = await chrome.storage.local.get(cacheKey);
+    const storage = isSessionOnlyUrl(imageUrl) ? chrome.storage.session : chrome.storage.local;
+    const result = await storage.get(cacheKey);
     const cached = result[cacheKey];
     if (!cached) return null;
     if (cached.version !== CACHE_VERSION) {
-      await chrome.storage.local.remove(cacheKey);
+      await storage.remove(cacheKey);
       return null;
     }
-    if (Date.now() - cached.timestamp > CACHE_TTL) {
+    // sessionキャッシュはTTL不要（セッション終了で自動破棄）
+    if (!isSessionOnlyUrl(imageUrl) && Date.now() - cached.timestamp > CACHE_TTL) {
       await chrome.storage.local.remove(cacheKey);
       return null;
     }
@@ -218,13 +225,18 @@ async function getCachedTranslation(imageUrl, targetLang) {
 async function saveCachedTranslation(imageUrl, targetLang, translations) {
   const cacheKey = await generateCacheKey(imageUrl, targetLang);
   const cacheData = { translations, timestamp: Date.now(), version: CACHE_VERSION };
+  const storage = isSessionOnlyUrl(imageUrl) ? chrome.storage.session : chrome.storage.local;
   try {
-    await chrome.storage.local.set({ [cacheKey]: cacheData });
-    const usage = await chrome.storage.local.getBytesInUse();
-    if (usage > 8 * 1024 * 1024) await cleanOldCache();
+    await storage.set({ [cacheKey]: cacheData });
+    if (!isSessionOnlyUrl(imageUrl)) {
+      const usage = await chrome.storage.local.getBytesInUse();
+      if (usage > 8 * 1024 * 1024) await cleanOldCache();
+    }
   } catch {
-    await cleanOldCache();
-    try { await chrome.storage.local.set({ [cacheKey]: cacheData }); } catch { /* 諦める */ }
+    if (!isSessionOnlyUrl(imageUrl)) {
+      await cleanOldCache();
+      try { await chrome.storage.local.set({ [cacheKey]: cacheData }); } catch { /* 諦める */ }
+    }
   }
 }
 
