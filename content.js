@@ -366,6 +366,8 @@ JSON配列のみ返してください:
       let imageUrl = null;
       if (comicInfo.type === 'svg' && comicInfo.element) {
         imageUrl = comicInfo.element.getAttribute('xlink:href') || comicInfo.element.getAttribute('href');
+      } else if (comicInfo.type === 'img' && comicInfo.element) {
+        imageUrl = comicInfo.element.src || null;
       }
 
       // Gemini Vision でOCR＋翻訳を一括処理
