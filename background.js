@@ -770,7 +770,9 @@ function parseVisionResponse(geminiResponse, imageDims) {
   // catchブロックで診断ログに使うためtryブロック外で宣言
   const sanitized = jsonMatch[0]
     .replace(/[\x00-\x1F\x7F]+/g, ' ')
-    .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
+    .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\')
+    // 3. ] や } の後にカンマなしで次のキーが続く場合のカンマ補完
+    .replace(/([}\]])\s+(")/g, '$1,$2');
 
   try {
     const results = JSON.parse(sanitized);
