@@ -146,7 +146,7 @@ const SETTINGS_DEFAULTS = {
   ollamaModel: 'qwen3-vl:8b',
   ollamaEndpoint: 'http://localhost:11434',
   targetLang: 'ja',
-  prefetch: true,
+  prefetch: false,
 };
 let settingsCache = null;
 
@@ -650,8 +650,11 @@ async function handlePreloadQueue(imageUrls, tabId) {
     clearTimeout(preloadDebounceTimer);
     return;
   }
+  // Blob URLはbackground.jsからfetchできないため除外
+  const normalUrls = imageUrls.filter(u => !u.startsWith('blob:'));
+  if (normalUrls.length === 0) return;
   // キュー上限を超えるURLは切り捨て
-  const clampedUrls = imageUrls.slice(0, PRELOAD_MAX_QUEUE);
+  const clampedUrls = normalUrls.slice(0, PRELOAD_MAX_QUEUE);
   // デバウンス: 短時間の連続呼び出しを抑制（最後の呼び出しから500ms後に実行）
   clearTimeout(preloadDebounceTimer);
   preloadDebounceTimer = setTimeout(() => {
