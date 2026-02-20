@@ -286,11 +286,38 @@ JSON配列のみ返してください:
   // ============================================================
   async function captureSvgImage(info) {
     const imageEl = info.element;
+
+    // まずCanvasで既レンダリング済み画像をキャプチャ（URLトークン失効でも動作する）
+    try {
+      const bitmap = await createImageBitmap(imageEl);
+      const MAX_DIM = 1024;
+      let w = bitmap.width, h = bitmap.height;
+      if (w > MAX_DIM || h > MAX_DIM) {
+        const scale = Math.min(MAX_DIM / w, MAX_DIM / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      bitmap.close();
+      return canvas.toDataURL('image/webp', 0.65);
+    } catch {
+      // SecurityError (CORS) 等 → URLフェッチにフォールバック
+    }
+
+    // URLからフェッチ（フォールバック）
     const imageUrl = imageEl.getAttribute('xlink:href') || imageEl.getAttribute('href');
     if (!imageUrl) throw new Error('コミック画像のURLが取得できません');
 
     const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE', url: imageUrl });
-    if (response.error) throw new Error(response.error);
+    if (response.error) {
+      if (response.error.includes('401') || response.error.includes('403') || response.error.includes('認証')) {
+        throw new Error('画像の認証が切れています。ページを更新（F5）してから再度お試しください。');
+      }
+      throw new Error(response.error);
+    }
     return response.imageData;
   }
 
