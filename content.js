@@ -248,38 +248,42 @@ JSON配列のみ返してください:
   }
 
   // ============================================================
-  // コミック画像の検出
+  // コミック画像の検出（汎用: Blob URL img優先・ビューポート内最大面積選択）
   // ============================================================
-  function findComicImage() {
-    const svgImage = document.querySelector('.rocket-reader image.pageImage');
-    if (svgImage) {
-      const svg = svgImage.closest('svg');
-      return { type: 'svg', element: svgImage, svg: svg };
-    }
-
-    const rocketSvg = document.querySelector('.rocket-reader svg.svg-el');
-    if (rocketSvg) {
-      const img = rocketSvg.querySelector('image');
-      if (img) return { type: 'svg', element: img, svg: rocketSvg };
-    }
-
+  function findLargestVisibleImage() {
     let best = null;
     let maxArea = 0;
+
     const candidates = [
+      // 1. Blob URL img（Kindle等）
+      ...[...document.querySelectorAll('img')].filter(el => el.src && el.src.startsWith('blob:')),
+      // 2. 通常のimg
+      ...[...document.querySelectorAll('img')].filter(el => el.src && !el.src.startsWith('blob:')),
+      // 3. SVG image要素（Marvel Unlimited等）
+      ...document.querySelectorAll('svg image'),
+      // 4. canvas
       ...document.querySelectorAll('canvas'),
-      ...document.querySelectorAll('.rocket-reader img'),
-      ...document.querySelectorAll('img[src*="i.annihil.us"]'),
     ];
+
     for (const el of candidates) {
       const rect = el.getBoundingClientRect();
       if (rect.width < 200 || rect.height < 200) continue;
+      // ビューポート外（Kindleの前ページ・次ページ）を除外
+      if (rect.left < 0 || rect.left >= window.innerWidth) continue;
+      if (rect.top < -rect.height || rect.top >= window.innerHeight) continue;
       const area = rect.width * rect.height;
-      if (area > maxArea) { maxArea = area; best = el; }
+      if (area > maxArea) {
+        maxArea = area;
+        const isSvgImage = el.tagName.toLowerCase() === 'image';
+        const isCanvas = el instanceof HTMLCanvasElement;
+        best = {
+          type: isSvgImage ? 'svg' : isCanvas ? 'canvas' : 'img',
+          element: el,
+        };
+      }
     }
-    if (best) {
-      return { type: best instanceof HTMLCanvasElement ? 'canvas' : 'img', element: best };
-    }
-    return null;
+
+    return best;
   }
 
   // ============================================================
@@ -364,7 +368,7 @@ JSON配列のみ返してください:
   async function translateCurrentPage() {
     if (isTranslating) return;
 
-    const comicInfo = findComicImage();
+    const comicInfo = findLargestVisibleImage();
     if (!comicInfo) {
       showNotification('コミック画像が見つかりません', 'error');
       return;
