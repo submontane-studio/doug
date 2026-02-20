@@ -151,6 +151,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     geminiApiKey: '',
     claudeApiKey: '',
     openaiApiKey: '',
+    geminiModel: 'gemini-2.5-flash-lite',
+    claudeModel: 'claude-sonnet-4-6',
+    openaiModel: 'gpt-5.2-2025-12-11',
     ollamaModel: 'qwen3-vl:8b',
     ollamaEndpoint: 'http://localhost:11434',
     targetLang: 'ja',
@@ -161,6 +164,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('geminiApiKey').value = settings.geminiApiKey;
   $('claudeApiKey').value = settings.claudeApiKey;
   $('openaiApiKey').value = settings.openaiApiKey;
+  $('geminiModel').value = settings.geminiModel;
+  $('claudeModel').value = settings.claudeModel;
+  $('openaiModel').value = settings.openaiModel;
   $('ollamaModel').value = settings.ollamaModel;
   $('ollamaEndpoint').value = settings.ollamaEndpoint;
   $('targetLang').value = settings.targetLang;
@@ -217,6 +223,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       geminiApiKey: $('geminiApiKey').value.trim(),
       claudeApiKey: $('claudeApiKey').value.trim(),
       openaiApiKey: $('openaiApiKey').value.trim(),
+      geminiModel: $('geminiModel').value,
+      claudeModel: $('claudeModel').value,
+      openaiModel: $('openaiModel').value,
       ollamaModel: $('ollamaModel').value,
       ollamaEndpoint,
       targetLang: $('targetLang').value,
