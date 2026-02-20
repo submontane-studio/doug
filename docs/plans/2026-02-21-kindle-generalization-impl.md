@@ -225,9 +225,12 @@ git commit -m "feat: 先読みデフォルトOFF & Blob URLをキューから除
 
 **Step 1: `findComicImage` 関数全体を `findLargestVisibleImage` に置き換え**
 
+> **【調査で確認済み】** KindleはBlob URL imgを3枚同時にDOMに持つ（前ページ: left=-1920, 現在: left=0, 次: left=+1920）。
+> サイズが全て同一のため**ビューポート内チェック必須**（left < 0 や left >= innerWidth を除外する）。
+
 ```js
 // ============================================================
-// コミック画像の検出（汎用: Blob URL img優先・最大面積選択）
+// コミック画像の検出（汎用: Blob URL img優先・ビューポート内最大面積選択）
 // ============================================================
 function findLargestVisibleImage() {
   let best = null;
@@ -247,6 +250,9 @@ function findLargestVisibleImage() {
   for (const el of candidates) {
     const rect = el.getBoundingClientRect();
     if (rect.width < 200 || rect.height < 200) continue;
+    // ビューポート外（Kindleの前ページ・次ページ）を除外
+    if (rect.left < 0 || rect.left >= window.innerWidth) continue;
+    if (rect.top < -rect.height || rect.top >= window.innerHeight) continue;
     const area = rect.width * rect.height;
     if (area > maxArea) {
       maxArea = area;
@@ -344,12 +350,16 @@ git commit -m "feat: UI配置をdocument.body固定に変更、Marvel dialog依�
 
 代わりに以下を追加（`init()` 関数の直前あたり）:
 
+> **【調査で確認済み】** Kindleのページ遷移は既存imgのsrc変化ではなく、
+> 新しいBlob URL imgの**DOM追加**（3〜4件）で発生する。
+> URLは変化しない。`popstate`/`hashchange` は念のため残す。
+
 ```js
 // ============================================================
 // 汎用ページ遷移検知
 // ============================================================
 function startUniversalPageWatcher() {
-  // URL変化を検知（Kindleはhashchange等でページが変わる）
+  // URL変化を検知（念のため: Marvel等でのSPA遷移に対応）
   const onUrlChange = () => {
     clearOverlays();
     isTranslating = false;
@@ -357,33 +367,29 @@ function startUniversalPageWatcher() {
   window.addEventListener('popstate', onUrlChange);
   window.addEventListener('hashchange', onUrlChange);
 
-  // Blob URL imgのsrc変化を監視（Kindleのページ遷移）
-  const blobImgObserver = new MutationObserver((mutations) => {
+  // Blob URL imgの新規追加を監視（Kindleのページ遷移で発生）
+  // ※ Kindleはページをめくるたびに新しいBlob URL imgを3〜4件DOM追加する
+  let clearTimer = null;
+  const bodyObserver = new MutationObserver((mutations) => {
     for (const m of mutations) {
-      if (m.type === 'attributes' && m.attributeName === 'src') {
-        const el = m.target;
-        if (el.src && el.src.startsWith('blob:')) {
-          clearOverlays();
-          isTranslating = false;
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        const hasBlobImg =
+          (node.tagName === 'IMG' && node.src?.startsWith('blob:')) ||
+          node.querySelector?.('img[src^="blob:"]');
+        if (hasBlobImg) {
+          // デバウンス: 複数追加を1回のclearにまとめる
+          clearTimeout(clearTimer);
+          clearTimer = setTimeout(() => {
+            clearOverlays();
+            isTranslating = false;
+          }, 100);
           return;
         }
       }
     }
   });
-
-  // 現在のBlob URL imgを監視登録し、DOM変化時に更新
-  const updateBlobObservers = () => {
-    blobImgObserver.disconnect();
-    for (const img of document.querySelectorAll('img')) {
-      if (img.src && img.src.startsWith('blob:')) {
-        blobImgObserver.observe(img, { attributes: true, attributeFilter: ['src'] });
-      }
-    }
-  };
-  updateBlobObservers();
-  new MutationObserver(updateBlobObservers).observe(document.body, {
-    childList: true, subtree: true,
-  });
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
 }
 ```
 
