@@ -784,7 +784,11 @@ function parseVisionResponse(geminiResponse, imageDims) {
   // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
   // catchブロックで診断ログに使うためtryブロック外で宣言
   const sanitized = jsonMatch[0]
+    // 0. LLMが追加する行コメントを削除（:// のURLは除外）
+    .replace(/(?<!:)\/\/.*$/gm, '')
+    // 1. 制御文字を空白に正規化（生改行・タブ等）
     .replace(/[\x00-\x1F\x7F]+/g, ' ')
+    // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
     .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\')
     // 3. 末尾カンマを削除（LLMが最後の要素の後にカンマを付ける場合）
     .replace(/,(\s*[}\]])/g, '$1')
@@ -844,7 +848,8 @@ function parseVisionResponse(geminiResponse, imageDims) {
     // 失敗箇所を特定するための診断ログ
     const pos = parseInt(err.message?.match(/position (\d+)/)?.[1] || '0', 10);
     if (pos > 0) {
-      console.error('[Doug bg] 問題箇所 (前後50文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 50), pos + 50)));
+      console.error('[Doug bg] 問題箇所 (前100文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 100), pos)));
+      console.error('[Doug bg] 問題箇所 (後100文字):', JSON.stringify(sanitized.substring(pos, pos + 100)));
     }
     return [];
   }
