@@ -796,10 +796,28 @@ function parseVisionResponse(geminiResponse, imageDims) {
     //    \s* でスペースなしの隣接ケース（]"key" 等）にも対応
     .replace(/([}\]])\s*(["{[])/g, '$1,$2');
 
-  try {
-    const results = JSON.parse(sanitized);
-    if (!Array.isArray(results)) return [];
+  // 途中切れ修復: 複数の候補を順に試みる
+  const candidates = [sanitized, sanitized + '}]', sanitized + '"}]'];
+  const lastObj = sanitized.lastIndexOf('},');
+  if (lastObj > 0) candidates.push(sanitized.substring(0, lastObj + 1) + ']');
 
+  let results = null;
+  let parseErr = null;
+  for (const candidate of candidates) {
+    try { results = JSON.parse(candidate); break; } catch (e) { parseErr = parseErr ?? e; }
+  }
+
+  if (!Array.isArray(results)) {
+    console.error('[Doug bg] Vision応答のパースに失敗:', parseErr);
+    const pos = parseInt(parseErr?.message?.match(/position (\d+)/)?.[1] || '0', 10);
+    if (pos > 0) {
+      console.error('[Doug bg] 問題箇所 (前100文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 100), pos)));
+      console.error('[Doug bg] 問題箇所 (後100文字):', JSON.stringify(sanitized.substring(pos, pos + 100)));
+    }
+    return [];
+  }
+
+  try {
     return results
       .filter(r => r.translated && (r.box || r.bbox))
       .map(r => {
