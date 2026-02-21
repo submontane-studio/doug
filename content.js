@@ -941,58 +941,54 @@ JSON配列のみ返してください:
   }
 
   // ============================================================
+  // 汎用ページ遷移検知
+  // ============================================================
+  function startUniversalPageWatcher() {
+    // URL変化を検知（念のため: Marvel等でのSPA遷移に対応）
+    const onUrlChange = () => {
+      clearOverlays();
+      isTranslating = false;
+    };
+    window.addEventListener('popstate', onUrlChange);
+    window.addEventListener('hashchange', onUrlChange);
+
+    // Blob URL imgの新規追加を監視（Kindleのページ遷移で発生）
+    // ※ Kindleはページをめくるたびに新しいBlob URL imgを3〜4件DOM追加する
+    let clearTimer = null;
+    const bodyObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const hasBlobImg =
+            (node.tagName === 'IMG' && node.src?.startsWith('blob:')) ||
+            node.querySelector?.('img[src^="blob:"]');
+          if (hasBlobImg) {
+            // デバウンス: 複数追加を1回のclearにまとめる
+            clearTimeout(clearTimer);
+            clearTimer = setTimeout(() => {
+              clearOverlays();
+              isTranslating = false;
+            }, 100);
+            return;
+          }
+        }
+      }
+    });
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ============================================================
   // 初期化
   // ============================================================
   function init() {
     createToolbar();
+    startUniversalPageWatcher();
   }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
-  }
-
-  // ページ遷移検知: SVG image要素のhref属性変更をMutationObserverで監視
-  let lastPageHref = '';
-  let pageObserver = null;
-  let watchedImage = null;
-
-  function startPageWatcher() {
-    if (pageObserver) return;
-    const svgImage = document.querySelector('.rocket-reader image.pageImage');
-    if (!svgImage) return;
-    watchedImage = svgImage;
-
-    // 初回チェック（先読みは翻訳完了後にトリガーするためここでは href 記録のみ）
-    const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
-    if (href && href !== lastPageHref) {
-      lastPageHref = href;
-    }
-
-    pageObserver = new MutationObserver(() => {
-      const href = watchedImage.getAttribute('xlink:href') || watchedImage.getAttribute('href') || '';
-      if (href && href !== lastPageHref) {
-        lastPageHref = href;
-        clearOverlays();
-        isTranslating = false; // ページ遷移時に翻訳中フラグをリセット
-        // 先読みは翻訳完了後にトリガーするためここでは起動しない
-      }
-    });
-    pageObserver.observe(svgImage, {
-      attributes: true,
-      attributeFilter: ['href', 'xlink:href'],
-    });
-  }
-
-  function stopPageWatcher() {
-    if (pageObserver) {
-      pageObserver.disconnect();
-      pageObserver = null;
-      watchedImage = null;
-    }
-    lastPageHref = '';
-    lastQueueKey = '';
   }
 
   // 先読み中のService Worker Keepalive（4.2秒待機中のスリープ防止）
