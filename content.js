@@ -888,25 +888,24 @@ JSON配列のみ返してください:
       item.textEl.style.fontSize = relaxed + 'px';
     }
 
-    // フェーズ3: 最小フォントでも収まらない場合 / 折り返し過多の場合にボックスを拡大
+    // フェーズ3: テキストがボックスに収まらない場合にボックスを拡大
     const cW = overlayContainer.clientWidth || 1;
     const cH = overlayContainer.clientHeight || 1;
     for (const item of items) {
       // 現在の left/top を取得（%文字列→数値）
       const curLeft = parseFloat(item.overlay.style.left) || 0;
       const curTop  = parseFloat(item.overlay.style.top)  || 0;
-      if (item.fontSize <= 12) {
-        if (item.textEl.scrollHeight > item.boxH + 1) {
-          const newH = (item.textEl.scrollHeight + 8) / cH * 100;
-          item.overlay.style.height = Math.min(newH, 100 - curTop) + '%';
-        }
-        if (item.textEl.scrollWidth > item.boxW + 1) {
-          const newW = (item.textEl.scrollWidth + 8) / cW * 100;
-          item.overlay.style.width = Math.min(newW, 100 - curLeft) + '%';
-        }
+      // 高さ拡大: height:auto でテキストが増えた場合は常に拡大
+      if (item.textEl.scrollHeight > item.boxH + 1) {
+        const newH = (item.textEl.scrollHeight + 8) / cH * 100;
+        item.overlay.style.height = Math.min(newH, 100 - curTop) + '%';
+      }
+      // 幅拡大: 最小フォントでも幅が足りない場合のみ拡大
+      if (item.fontSize <= 12 && item.textEl.scrollWidth > item.boxW + 1) {
+        const newW = (item.textEl.scrollWidth + 8) / cW * 100;
+        item.overlay.style.width = Math.min(newW, 100 - curLeft) + '%';
       }
       // 折り返し過多チェック: 1行に伸ばしたときの自然幅がボックスの2倍を超える場合は幅を広げる
-      // （日本語は英語より文字幅が大きく、狭いボックスで多段折り返しになりやすいため）
       item.textEl.style.whiteSpace = 'nowrap';
       const naturalW = item.textEl.scrollWidth;
       item.textEl.style.whiteSpace = '';
