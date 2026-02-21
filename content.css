@@ -101,7 +101,7 @@
 
 .mut-overlay-text {
   width: fit-content;
-  max-width: 100%;
+  max-width: max(180px, 50%);
   height: 100%;
   display: flex;
   align-items: center;
