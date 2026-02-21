@@ -134,11 +134,11 @@
   border: 2px solid #222;
 }
 
-/* キャプション/ナレーション */
+/* キャプション/ナレーション（背景色はLLMが返した値を優先。省略時は白） */
 .mut-type-caption .mut-overlay-text,
 .mut-type-narration .mut-overlay-text {
-  background: rgba(255, 248, 200, 1);
-  color: #222;
+  background: rgba(255, 255, 255, 1);
+  color: #111;
   border-radius: 2px;
   border: 2px solid #222;
 }

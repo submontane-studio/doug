@@ -869,8 +869,8 @@ JSON配列のみ返してください:
       const innerH = Math.max(boxH - 14, 10);
       const charCount = (textEl.textContent || '').length;
       // 0.58: 日本語は英語より文字幅が大きいため保守的な初期値にする
-      let fontSize = Math.min(Math.sqrt((innerW * innerH) / Math.max(charCount, 1)) * 0.58, 12);
-      fontSize = Math.max(fontSize, 5);
+      let fontSize = Math.min(Math.sqrt((innerW * innerH) / Math.max(charCount, 1)) * 0.58, 16);
+      fontSize = Math.max(fontSize, 11);
       textEl.style.fontSize = fontSize + 'px';
       items.push({ overlay, textEl, boxW, boxH, fontSize });
     });
@@ -880,11 +880,11 @@ JSON配列のみ返してください:
       for (let i = 0; i < 30; i++) {
         if (item.textEl.scrollWidth <= item.boxW + 1 && item.textEl.scrollHeight <= item.boxH + 1) break;
         item.fontSize -= 0.3;
-        if (item.fontSize < 5) break;
+        if (item.fontSize < 11) break;
         item.textEl.style.fontSize = item.fontSize + 'px';
       }
-      // フィット後に30%縮小して余裕を確保
-      const relaxed = Math.max(item.fontSize * 0.70, 5);
+      // フィット後に15%縮小して余裕を確保（最低11px）
+      const relaxed = Math.max(item.fontSize * 0.85, 11);
       item.textEl.style.fontSize = relaxed + 'px';
     }
 
@@ -892,7 +892,7 @@ JSON配列のみ返してください:
     const cW = overlayContainer.clientWidth || 1;
     const cH = overlayContainer.clientHeight || 1;
     for (const item of items) {
-      if (item.fontSize <= 6) {
+      if (item.fontSize <= 12) {
         if (item.textEl.scrollHeight > item.boxH + 1) {
           item.overlay.style.height = ((item.textEl.scrollHeight + 8) / cH * 100) + '%';
         }
@@ -906,7 +906,7 @@ JSON配列のみ返してください:
       const naturalW = item.textEl.scrollWidth;
       item.textEl.style.whiteSpace = '';
       if (naturalW > item.boxW * 1.5) {
-        const targetW = Math.min(naturalW + 10, cW * 0.38);
+        const targetW = Math.min(naturalW + 10, cW * 0.30);
         item.overlay.style.width = (targetW / cW * 100) + '%';
       }
     }
