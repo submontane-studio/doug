@@ -248,45 +248,45 @@ JSON配列のみ返してください:
   }
 
   // ============================================================
-  // コミック画像の検出（汎用: Blob URL img優先・ビューポート内最大面積選択）
+  // コミック画像の検出（カテゴリー優先度 × カテゴリー内最大面積選択）
+  // 優先度: Blob URL img（Kindle等）> SVG image（Marvel等）> 通常img > canvas
   // ============================================================
   function findLargestVisibleImage() {
-    let best = null;
-    let maxArea = 0;
+    const minArea = Math.max(200 * 200, window.innerWidth * window.innerHeight * 0.1);
 
-    const candidates = [
-      // 1. Blob URL img（Kindle等）
-      ...[...document.querySelectorAll('img')].filter(el => el.src && el.src.startsWith('blob:')),
-      // 2. 通常のimg
-      ...[...document.querySelectorAll('img')].filter(el => el.src && !el.src.startsWith('blob:')),
-      // 3. SVG image要素
-      ...document.querySelectorAll('svg image'),
-      // 4. canvas
-      ...document.querySelectorAll('canvas'),
-    ];
-
-    for (const el of candidates) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 200 || rect.height < 200) continue;
-      // ビューポート外（Kindleの前ページ・次ページ）を除外
-      if (rect.left < 0 || rect.left >= window.innerWidth) continue;
-      if (rect.top < -rect.height || rect.top >= window.innerHeight) continue;
-      const area = rect.width * rect.height;
-      // ビューポートの10%未満の要素（バナー等）を除外
-      const minArea = Math.max(200 * 200, window.innerWidth * window.innerHeight * 0.1);
-      if (area < minArea) continue;
-      if (area > maxArea) {
-        maxArea = area;
-        const isSvgImage = el.tagName.toLowerCase() === 'image';
-        const isCanvas = el instanceof HTMLCanvasElement;
-        best = {
-          type: isSvgImage ? 'svg' : isCanvas ? 'canvas' : 'img',
-          element: el,
-        };
+    function bestInGroup(els, type) {
+      let best = null;
+      let maxArea = 0;
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 200 || rect.height < 200) continue;
+        // ビューポート外（Kindleの前ページ・次ページ）を除外
+        if (rect.left < 0 || rect.left >= window.innerWidth) continue;
+        if (rect.top < -rect.height || rect.top >= window.innerHeight) continue;
+        const area = rect.width * rect.height;
+        // ビューポートの10%未満の要素（バナー等）を除外
+        if (area < minArea) continue;
+        if (area > maxArea) {
+          maxArea = area;
+          best = { type, element: el };
+        }
       }
+      return best;
     }
 
-    return best;
+    const groups = [
+      { type: 'img',    els: [...document.querySelectorAll('img')].filter(el => el.src && el.src.startsWith('blob:')) },
+      { type: 'svg',    els: [...document.querySelectorAll('svg image')] },
+      { type: 'img',    els: [...document.querySelectorAll('img')].filter(el => el.src && !el.src.startsWith('blob:')) },
+      { type: 'canvas', els: [...document.querySelectorAll('canvas')] },
+    ];
+
+    for (const { type, els } of groups) {
+      const result = bestInGroup(els, type);
+      if (result) return result;
+    }
+
+    return null;
   }
 
   // ============================================================
@@ -349,16 +349,29 @@ JSON配列のみ返してください:
       ctx.drawImage(element, 0, 0, w, h);
       return canvas.toDataURL('image/webp', 0.65);
     } catch (err) {
-      if (err.name === 'SecurityError') {
-        throw new Error('セキュリティ制約により画像を取得できません（CORS制限）。別の方法で画像を取得しています...');
-      }
+      if (err.name === 'SecurityError') throw err;
       throw new Error(`画像の変換に失敗しました: ${err.message}`);
     }
   }
 
   async function captureComic(info) {
     if (info.type === 'svg') return captureSvgImage(info);
-    return captureRasterElement(info.element);
+    try {
+      return captureRasterElement(info.element);
+    } catch (err) {
+      // SecurityError (CORS) → URLフェッチにフォールバック（captureSvgImageと同パターン）
+      if (err.name !== 'SecurityError') throw err;
+      const imageUrl = info.element.src || null;
+      if (!imageUrl) throw new Error('セキュリティ制約により画像を取得できません（CORS制限）');
+      const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE', url: imageUrl });
+      if (response.error) {
+        if (response.error.includes('401') || response.error.includes('403') || response.error.includes('認証')) {
+          throw new Error('画像の認証が切れています。ページを更新（F5）してから再度お試しください。');
+        }
+        throw new Error(response.error);
+      }
+      return response.imageData;
+    }
   }
 
   function getOverlayTarget(info) {
