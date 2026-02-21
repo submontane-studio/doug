@@ -272,6 +272,9 @@ JSON配列のみ返してください:
       if (rect.left < 0 || rect.left >= window.innerWidth) continue;
       if (rect.top < -rect.height || rect.top >= window.innerHeight) continue;
       const area = rect.width * rect.height;
+      // ビューポートの10%未満の要素（バナー等）を除外
+      const minArea = Math.max(200 * 200, window.innerWidth * window.innerHeight * 0.1);
+      if (area < minArea) continue;
       if (area > maxArea) {
         maxArea = area;
         const isSvgImage = el.tagName.toLowerCase() === 'image';
@@ -463,8 +466,8 @@ JSON配列のみ返してください:
       const url = entry.name;
       // Blob URLはキャッシュキーに使えないためスキップ
       if (url.startsWith('blob:')) continue;
-      // 画像系のリソースのみ収集（拡張子またはimageを含むパス）
-      if (!/\.(jpg|jpeg|png|webp)(\?|$)/i.test(url) && !url.includes('/image')) continue;
+      // 画像系の拡張子のみ収集
+      if (!/\.(jpg|jpeg|png|webp)(\?|$)/i.test(url)) continue;
       if (url.includes('/thumbnails/')) continue;
       let p;
       try { p = new URL(url).pathname; } catch { p = url.split('?')[0]; }
@@ -483,9 +486,12 @@ JSON配列のみ返してください:
   function findNextBlobImage() {
     const blobImgs = [...document.querySelectorAll('img')]
       .filter(img => img.src && img.src.startsWith('blob:') && img.complete)
-      .sort((a, b) =>
-        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
-      );
+      .sort((a, b) => {
+        const pos = a.compareDocumentPosition(b);
+        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+      });
     if (blobImgs.length < 2) return null;
     const currentEl = findLargestVisibleImage()?.element;
     if (!currentEl) return blobImgs[1] || null;
