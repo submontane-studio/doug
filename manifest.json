@@ -9,8 +9,8 @@
   ],
   "host_permissions": [
     "https://*.marvel.com/*",
-    "https://*.amazon.co.jp/*",
-    "https://*.amazon.com/*",
+    "https://read.amazon.co.jp/*",
+    "https://read.amazon.com/*",
     "https://i.annihil.us/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.anthropic.com/*",
@@ -21,8 +21,8 @@
     {
       "matches": [
         "https://*.marvel.com/*",
-        "https://*.amazon.co.jp/*",
-        "https://*.amazon.com/*"
+        "https://read.amazon.co.jp/*",
+        "https://read.amazon.com/*"
       ],
       "js": ["content.js"],
       "css": ["content.css"],

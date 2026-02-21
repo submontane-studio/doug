@@ -2,7 +2,7 @@
 
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日
 const CACHE_VERSION = '1.1';
-const ALLOWED_SITES_RE = /^https:\/\/([^/]*\.marvel\.com|[^/]*\.amazon\.co\.jp|[^/]*\.amazon\.com)(\/|$)/;
+const ALLOWED_SITES_RE = /^https:\/\/([^/]*\.marvel\.com|read\.amazon\.co\.jp|read\.amazon\.com)(\/|$)/;
 
 // ============================================================
 // マイグレーション: sync → local への移行
@@ -52,7 +52,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはmarvel.com / amazon.co.jp / amazon.comドメインのみ許可
+  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはmarvel.com / read.amazon.co.jp / read.amazon.comドメインのみ許可
   // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
   if (sender.id !== chrome.runtime.id) {
     sendResponse({ error: '不正な送信元です' });
