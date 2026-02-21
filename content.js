@@ -948,6 +948,7 @@ JSON配列のみ返してください:
     const onUrlChange = () => {
       clearOverlays();
       isTranslating = false;
+      lastQueueKey = '';
     };
     window.addEventListener('popstate', onUrlChange);
     window.addEventListener('hashchange', onUrlChange);
@@ -968,6 +969,7 @@ JSON配列のみ返してください:
             clearTimer = setTimeout(() => {
               clearOverlays();
               isTranslating = false;
+              lastQueueKey = '';
             }, 100);
             return;
           }
