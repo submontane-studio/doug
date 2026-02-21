@@ -460,11 +460,15 @@ JSON配列のみ返してください:
 
   const perfObserver = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
-      if (entry.name.includes('/digitalcomic/') && entry.name.includes('/jpg_75/') && !entry.name.includes('/thumbnails/')) {
-        let p;
-        try { p = new URL(entry.name).pathname; } catch { p = entry.name.split('?')[0]; }
-        if (!comicPageUrls.has(p)) comicPageUrls.set(p, entry.name);
-      }
+      const url = entry.name;
+      // Blob URLはキャッシュキーに使えないためスキップ
+      if (url.startsWith('blob:')) continue;
+      // 画像系のリソースのみ収集（拡張子またはimageを含むパス）
+      if (!/\.(jpg|jpeg|png|webp)(\?|$)/i.test(url) && !url.includes('/image')) continue;
+      if (url.includes('/thumbnails/')) continue;
+      let p;
+      try { p = new URL(url).pathname; } catch { p = url.split('?')[0]; }
+      if (!comicPageUrls.has(p)) comicPageUrls.set(p, url);
     }
   });
   perfObserver.observe({ type: 'resource', buffered: true });
