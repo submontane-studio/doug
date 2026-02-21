@@ -446,7 +446,6 @@ async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model
     generationConfig: {
       temperature: 0.2,
       maxOutputTokens: 32000,
-      thinkingConfig: { thinkingBudget: 0 },
     },
   });
 
