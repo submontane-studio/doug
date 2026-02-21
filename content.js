@@ -676,7 +676,7 @@ JSON配列のみ返してください:
       height: rect.height + 'px',
       pointerEvents: 'none',
       zIndex: '99998',
-      overflow: 'visible',
+      overflow: 'hidden',
     });
 
     // 各アイテムのbbox（%単位）を計算し、重なりを検出してから描画
@@ -892,12 +892,17 @@ JSON配列のみ返してください:
     const cW = overlayContainer.clientWidth || 1;
     const cH = overlayContainer.clientHeight || 1;
     for (const item of items) {
+      // 現在の left/top を取得（%文字列→数値）
+      const curLeft = parseFloat(item.overlay.style.left) || 0;
+      const curTop  = parseFloat(item.overlay.style.top)  || 0;
       if (item.fontSize <= 12) {
         if (item.textEl.scrollHeight > item.boxH + 1) {
-          item.overlay.style.height = ((item.textEl.scrollHeight + 8) / cH * 100) + '%';
+          const newH = (item.textEl.scrollHeight + 8) / cH * 100;
+          item.overlay.style.height = Math.min(newH, 100 - curTop) + '%';
         }
         if (item.textEl.scrollWidth > item.boxW + 1) {
-          item.overlay.style.width = ((item.textEl.scrollWidth + 8) / cW * 100) + '%';
+          const newW = (item.textEl.scrollWidth + 8) / cW * 100;
+          item.overlay.style.width = Math.min(newW, 100 - curLeft) + '%';
         }
       }
       // 折り返し過多チェック: 1行に伸ばしたときの自然幅がボックスの2倍を超える場合は幅を広げる
@@ -906,7 +911,7 @@ JSON配列のみ返してください:
       const naturalW = item.textEl.scrollWidth;
       item.textEl.style.whiteSpace = '';
       if (naturalW > item.boxW * 1.5) {
-        const targetW = Math.min(naturalW + 10, cW * 0.30);
+        const targetW = Math.min(naturalW + 10, cW * 0.30, cW - item.overlay.offsetLeft);
         item.overlay.style.width = (targetW / cW * 100) + '%';
       }
     }

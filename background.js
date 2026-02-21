@@ -445,7 +445,7 @@ async function translateImageWithGemini(apiKey, parsed, prompt, imageDims, model
     }],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 16000,
+      maxOutputTokens: 32000,
       thinkingConfig: { thinkingBudget: 0 },
     },
   });
@@ -482,7 +482,7 @@ async function translateImageWithClaude(apiKey, parsed, prompt, imageDims, model
   const url = 'https://api.anthropic.com/v1/messages';
   const body = JSON.stringify({
     model: model || 'claude-sonnet-4-6',
-    max_tokens: 16000,
+    max_tokens: 32000,
     messages: [{
       role: 'user',
       content: [
@@ -535,7 +535,7 @@ async function translateImageWithOpenAI(apiKey, imageDataUrl, prompt, imageDims,
   const url = 'https://api.openai.com/v1/chat/completions';
   const body = JSON.stringify({
     model: model || 'gpt-5.2-2025-12-11',
-    max_tokens: 16000,
+    max_tokens: 32000,
     messages: [{
       role: 'user',
       content: [
