@@ -259,7 +259,7 @@ JSON配列のみ返してください:
       ...[...document.querySelectorAll('img')].filter(el => el.src && el.src.startsWith('blob:')),
       // 2. 通常のimg
       ...[...document.querySelectorAll('img')].filter(el => el.src && !el.src.startsWith('blob:')),
-      // 3. SVG image要素（Marvel Unlimited等）
+      // 3. SVG image要素
       ...document.querySelectorAll('svg image'),
       // 4. canvas
       ...document.querySelectorAll('canvas'),
