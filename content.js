@@ -979,7 +979,8 @@ JSON配列のみ返してください:
   // UI配置
   // ============================================================
   function getUIParent() {
-    return document.body;
+    // showModal()で開いたdialogはtop-layerを使うため、body配置のUIが隠れる
+    return document.querySelector('dialog[open]') || document.body;
   }
 
   // ============================================================
@@ -1019,6 +1020,41 @@ JSON配列のみ返してください:
       }
     });
     bodyObserver.observe(document.body, { childList: true, subtree: true });
+
+    // SVG image要素のhref変化を監視（Marvel等でのSPA内ページ遷移に対応）
+    // ※ MutationObserver の attributeFilter は xlink:href を直接監視できないブラウザもあるため
+    //   href と xlink:href の両方を指定し、SVG image要素のみでclearする
+    const svgObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.target.tagName?.toLowerCase() === 'image') {
+          clearOverlays();
+          isTranslating = false;
+          lastQueueKey = '';
+          return;
+        }
+      }
+    });
+    svgObserver.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['href', 'xlink:href'],
+    });
+
+    // dialog[open]の変化を監視してtoolbarを適切な親に移動
+    // ※ showModal()で開いたdialogはtop-layerを使うためbody配置のUIが隠れる
+    const dialogWatcher = new MutationObserver(() => {
+      if (!toolbar) return;
+      const parent = document.querySelector('dialog[open]') || document.body;
+      if (toolbar.parentElement !== parent) {
+        parent.appendChild(toolbar);
+      }
+    });
+    dialogWatcher.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['open'],
+    });
   }
 
   // ============================================================
