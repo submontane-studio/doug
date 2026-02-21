@@ -2,11 +2,6 @@
    Doug - コンテンツスタイル
    ============================================================ */
 
-/* dialogのoverflow制約を解除して下部の吹き出しが切れるのを防止 */
-dialog.ComicPurchasePaths__Reader[open] {
-  overflow: visible !important;
-}
-
 /* ツールバー */
 #mut-toolbar {
   position: fixed;

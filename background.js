@@ -52,7 +52,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはmarvel.comドメインのみ許可
+  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはmarvel.com / amazon.co.jp / amazon.comドメインのみ許可
   // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
   if (sender.id !== chrome.runtime.id) {
     sendResponse({ error: '不正な送信元です' });

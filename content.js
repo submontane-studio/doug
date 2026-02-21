@@ -497,11 +497,10 @@ JSON配列のみ返してください:
   let safeModePreloadTimer = null;
 
   async function scheduleSafeModeNextPage() {
+    clearTimeout(safeModePreloadTimer);
     // prefetch設定を確認（デフォルトOFF）
     const { prefetch } = await chrome.storage.local.get({ prefetch: false });
     if (!prefetch) return;
-
-    clearTimeout(safeModePreloadTimer);
     safeModePreloadTimer = setTimeout(async () => {
       try {
         const nextImg = findNextBlobImage();
