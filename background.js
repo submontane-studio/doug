@@ -786,8 +786,11 @@ function parseVisionResponse(geminiResponse, imageDims) {
   const sanitized = jsonMatch[0]
     .replace(/[\x00-\x1F\x7F]+/g, ' ')
     .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\')
-    // 3. ] や } の後にカンマなしで次のキーが続く場合のカンマ補完
-    .replace(/([}\]])\s+(")/g, '$1,$2');
+    // 3. 末尾カンマを削除（LLMが最後の要素の後にカンマを付ける場合）
+    .replace(/,(\s*[}\]])/g, '$1')
+    // 4. } や ] の後にカンマなしで次のプロパティ/要素が続く場合のカンマ補完
+    //    \s* でスペースなしの隣接ケース（]"key" 等）にも対応
+    .replace(/([}\]])\s*(["{[])/g, '$1,$2');
 
   try {
     const results = JSON.parse(sanitized);
