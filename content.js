@@ -479,8 +479,56 @@ JSON配列のみ返してください:
 
   let lastQueueKey = '';  // 前回送信したキューのキー（重複送信防止）
 
+  // セーフモード先読み用：現在の最大imgの次のBlob URL imgを探す
+  function findNextBlobImage() {
+    const blobImgs = [...document.querySelectorAll('img')]
+      .filter(img => img.src && img.src.startsWith('blob:') && img.complete)
+      .sort((a, b) =>
+        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+      );
+    if (blobImgs.length < 2) return null;
+    const currentEl = findLargestVisibleImage()?.element;
+    if (!currentEl) return blobImgs[1] || null;
+    const idx = blobImgs.indexOf(currentEl);
+    if (idx === -1 || idx === blobImgs.length - 1) return null;
+    return blobImgs[idx + 1];
+  }
+
+  let safeModePreloadTimer = null;
+
+  async function scheduleSafeModeNextPage() {
+    // prefetch設定を確認（デフォルトOFF）
+    const { prefetch } = await chrome.storage.local.get({ prefetch: false });
+    if (!prefetch) return;
+
+    clearTimeout(safeModePreloadTimer);
+    safeModePreloadTimer = setTimeout(async () => {
+      try {
+        const nextImg = findNextBlobImage();
+        if (!nextImg) return;
+
+        // Canvas変換してBase64取得（Blob URLはCORS制限なし）
+        const imageData = captureRasterElement(nextImg);
+        if (!imageData) return;
+        // background.jsに送信（内部でキャッシュチェック・session保存）
+        const port = chrome.runtime.connect({ name: 'translate' });
+        port.postMessage({ type: 'TRANSLATE_IMAGE', imageData, imageUrl: nextImg.src });
+        port.onMessage.addListener(() => port.disconnect());
+        port.onDisconnect.addListener(() => {});
+      } catch {
+        // セーフモード先読みの失敗は無視
+      }
+    }, 4200); // 4.2秒ディレイ（レート制限対応）
+  }
+
   function triggerPrefetch(currentImageUrl) {
     try {
+      // Blob URL（Kindle等）はセーフモード先読みフローへ
+      if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
+        scheduleSafeModeNextPage();
+        return;
+      }
+
       const allPages = getComicPageUrls();
       if (allPages.length === 0) return;
 
@@ -495,15 +543,6 @@ JSON配列のみ返してください:
       const currentFile = currentImageUrl ? getFilename(currentImageUrl) : null;
       if (currentFile) {
         currentIndex = allPages.findIndex(url => getFilename(url) === currentFile);
-      }
-      // URLでマッチしない場合、SVG要素から取得
-      if (currentIndex === -1) {
-        const svgImage = document.querySelector('.rocket-reader image.pageImage');
-        if (svgImage) {
-          const href = svgImage.getAttribute('xlink:href') || svgImage.getAttribute('href') || '';
-          const hrefFile = getFilename(href);
-          currentIndex = allPages.findIndex(url => getFilename(url) === hrefFile);
-        }
       }
       if (currentIndex === -1) return;
 
