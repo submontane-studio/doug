@@ -508,13 +508,13 @@ JSON配列のみ返してください:
         if (!nextImg) return;
 
         // Canvas変換してBase64取得（Blob URLはCORS制限なし）
+        // captureRasterElement はエラー時にthrowするため、失敗は外側のcatchで捕捉される
         const imageData = captureRasterElement(nextImg);
-        if (!imageData) return;
         // background.jsに送信（内部でキャッシュチェック・session保存）
         const port = chrome.runtime.connect({ name: 'translate' });
         port.postMessage({ type: 'TRANSLATE_IMAGE', imageData, imageUrl: nextImg.src });
         port.onMessage.addListener(() => port.disconnect());
-        port.onDisconnect.addListener(() => {});
+        port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
       } catch {
         // セーフモード先読みの失敗は無視
       }
