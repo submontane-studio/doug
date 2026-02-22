@@ -1063,6 +1063,29 @@ JSON配列のみ返してください:
       attributeFilter: ['href', 'xlink:href'],
     });
 
+    // 通常img要素のsrc変化を監視（ComicBookPlus等のimg.src直接書き換えに対応）
+    // ※ turnpage() は document.getElementById("maincomic").src を直接書き換えてページ遷移する
+    const imgSrcObserver = new MutationObserver((mutations) => {
+      // 翻訳オーバーレイ表示中のみ反応（遅延ロードやバナー差し替えによる誤発火を防ぐ）
+      if (!overlayContainer) return;
+      for (const m of mutations) {
+        if (m.target.tagName === 'IMG') {
+          const rect = m.target.getBoundingClientRect();
+          if (rect.width > 200 && rect.height > 200) {
+            clearOverlays();
+            isTranslating = false;
+            lastQueueKey = '';
+            return;
+          }
+        }
+      }
+    });
+    imgSrcObserver.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src'],
+    });
+
     // dialog[open]の変化を監視してtoolbarを適切な親に移動
     // ※ showModal()で開いたdialogはtop-layerを使うためbody配置のUIが隠れる
     const dialogWatcher = new MutationObserver(() => {

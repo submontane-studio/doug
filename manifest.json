@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Doug",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
   "permissions": [
     "activeTab",
@@ -11,6 +11,7 @@
     "https://*.marvel.com/*",
     "https://read.amazon.co.jp/*",
     "https://read.amazon.com/*",
+    "https://*.comicbookplus.com/*",
     "https://i.annihil.us/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.anthropic.com/*",
@@ -22,7 +23,8 @@
       "matches": [
         "https://*.marvel.com/*",
         "https://read.amazon.co.jp/*",
-        "https://read.amazon.com/*"
+        "https://read.amazon.com/*",
+        "https://*.comicbookplus.com/*"
       ],
       "js": ["content.js"],
       "css": ["content.css"],
