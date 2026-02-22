@@ -47,6 +47,15 @@
   background: #c62828;
 }
 
+.mut-btn-active {
+  background: rgba(226, 54, 54, 0.2);
+  color: #ff8a80;
+}
+.mut-btn-active:hover {
+  background: rgba(226, 54, 54, 0.35);
+  color: #ff6b6b;
+}
+
 .mut-btn.loading {
   pointer-events: none;
   opacity: 0.7;

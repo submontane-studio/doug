@@ -8,6 +8,8 @@
   let overlayContainer = null;
   let toolbar = null;
   let overlaysVisible = true;
+  let autoTranslate = false;
+  let autoTranslateTimer = null;
 
   // ============================================================
   // Ollama 直接呼び出し（Service Worker タイムアウト回避）
@@ -179,6 +181,18 @@ JSON配列のみ返してください:
       '<path d="M14 14l3 6 3-6M15.5 18h5"/></svg>');
     translateBtn.append(' 翻訳');
 
+    const autoBtn = document.createElement('button');
+    autoBtn.id = 'mut-btn-auto';
+    autoBtn.className = 'mut-btn';
+    autoBtn.title = '自動翻訳: OFF（クリックでON）';
+    autoBtn.insertAdjacentHTML('afterbegin',
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<polyline points="17 1 21 5 17 9"/>' +
+      '<path d="M3 11V9a4 4 0 0 1 4-4h14"/>' +
+      '<polyline points="7 23 3 19 7 15"/>' +
+      '<path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>');
+    autoBtn.append(' 自動');
+
     const toggleBtn = document.createElement('button');
     toggleBtn.id = 'mut-btn-toggle';
     toggleBtn.className = 'mut-btn';
@@ -198,7 +212,7 @@ JSON配列のみ返してください:
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
       '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>');
 
-    toolbar.append(translateBtn, toggleBtn, clearBtn);
+    toolbar.append(translateBtn, autoBtn, toggleBtn, clearBtn);
     const parent = getUIParent();
     parent.appendChild(toolbar);
 
@@ -214,6 +228,7 @@ JSON配列のみ返してください:
     parent.appendChild(bar);
 
     document.getElementById('mut-btn-translate').addEventListener('click', translateCurrentPage);
+    document.getElementById('mut-btn-auto').addEventListener('click', toggleAutoTranslate);
     document.getElementById('mut-btn-toggle').addEventListener('click', toggleOverlays);
     document.getElementById('mut-btn-clear').addEventListener('click', clearOverlays);
 
@@ -971,6 +986,22 @@ JSON配列のみ返してください:
     if (clearBtn) clearBtn.style.display = 'none';
   }
 
+  function toggleAutoTranslate() {
+    autoTranslate = !autoTranslate;
+    const btn = document.getElementById('mut-btn-auto');
+    if (!btn) return;
+    btn.classList.toggle('mut-btn-active', autoTranslate);
+    btn.title = autoTranslate ? '自動翻訳: ON（クリックでOFF）' : '自動翻訳: OFF（クリックでON）';
+  }
+
+  function scheduleAutoTranslate() {
+    clearTimeout(autoTranslateTimer);
+    // 画像が完全にロードされるまで少し待ってから翻訳を実行
+    autoTranslateTimer = setTimeout(() => {
+      translateCurrentPage();
+    }, 600);
+  }
+
   // ============================================================
   // 通知
   // ============================================================
@@ -1015,12 +1046,14 @@ JSON配列のみ返してください:
       clearOverlays();
       isTranslating = false;
       lastQueueKey = '';
+      if (autoTranslate) scheduleAutoTranslate();
     };
     window.addEventListener('popstate', onUrlChange);
     window.addEventListener('hashchange', onUrlChange);
 
-    // Blob URL imgの新規追加を監視（Kindleのページ遷移で発生）
+    // Blob URL img / SVG image 要素の新規追加を監視
     // ※ Kindleはページをめくるたびに新しいBlob URL imgを3〜4件DOM追加する
+    // ※ Marvel ULはページ遷移時に SVG <image> 要素を削除→新規追加で入れ替える
     let clearTimer = null;
     const bodyObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -1029,13 +1062,19 @@ JSON配列のみ返してください:
           const hasBlobImg =
             (node.tagName === 'IMG' && node.src?.startsWith('blob:')) ||
             node.querySelector?.('img[src^="blob:"]');
-          if (hasBlobImg) {
+          // SVG image要素の追加（オーバーレイ表示中 or 自動翻訳ON のみ反応して誤発火を防ぐ）
+          const hasSvgImage = (overlayContainer || autoTranslate) && (
+            node.tagName?.toLowerCase() === 'image' ||
+            !!node.querySelector?.('image')
+          );
+          if (hasBlobImg || hasSvgImage) {
             // デバウンス: 複数追加を1回のclearにまとめる
             clearTimeout(clearTimer);
             clearTimer = setTimeout(() => {
               clearOverlays();
               isTranslating = false;
               lastQueueKey = '';
+              if (autoTranslate) scheduleAutoTranslate();
             }, 100);
             return;
           }
@@ -1053,6 +1092,7 @@ JSON配列のみ返してください:
           clearOverlays();
           isTranslating = false;
           lastQueueKey = '';
+          if (autoTranslate) scheduleAutoTranslate();
           return;
         }
       }
@@ -1066,8 +1106,8 @@ JSON配列のみ返してください:
     // 通常img要素のsrc変化を監視（ComicBookPlus等のimg.src直接書き換えに対応）
     // ※ turnpage() は document.getElementById("maincomic").src を直接書き換えてページ遷移する
     const imgSrcObserver = new MutationObserver((mutations) => {
-      // 翻訳オーバーレイ表示中のみ反応（遅延ロードやバナー差し替えによる誤発火を防ぐ）
-      if (!overlayContainer) return;
+      // 翻訳オーバーレイ表示中 or 自動翻訳ON のみ反応（遅延ロードやバナー差し替えによる誤発火を防ぐ）
+      if (!overlayContainer && !autoTranslate) return;
       for (const m of mutations) {
         if (m.target.tagName === 'IMG') {
           const rect = m.target.getBoundingClientRect();
@@ -1075,6 +1115,7 @@ JSON配列のみ返してください:
             clearOverlays();
             isTranslating = false;
             lastQueueKey = '';
+            if (autoTranslate) scheduleAutoTranslate();
             return;
           }
         }
