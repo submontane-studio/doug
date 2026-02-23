@@ -30,8 +30,13 @@ function isSiteAllowed(url) {
 }
 
 async function injectToTab(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-  await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] });
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] });
+  } catch (err) {
+    // タブが閉じられた・非対応ページの場合は静かに失敗
+    console.warn('[doug] injectToTab 失敗:', err.message);
+  }
 }
 
 async function saveToWhitelist(origin, tabId) {
@@ -173,6 +178,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete') return;
   if (!tab.url) return;
   try {
+    // Service Worker 中間起動時に whitelistedOrigins が空になる場合を考慮して復元
+    if (whitelistedOrigins.size === 0) await loadWhitelist();
     const origin = new URL(tab.url).origin;
     if (!whitelistedOrigins.has(origin)) return;
     await injectToTab(tabId);
