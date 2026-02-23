@@ -29,6 +29,29 @@ function isSiteAllowed(url) {
   } catch { return false; }
 }
 
+async function injectToTab(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] });
+}
+
+async function saveToWhitelist(origin, tabId) {
+  const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+  if (!whitelist.includes(origin)) {
+    whitelist.push(origin);
+    await chrome.storage.sync.set({ whitelist });
+    // storage.onChanged がキャッシュを更新する
+  }
+  if (tabId != null) await injectToTab(tabId);
+}
+
+async function removeFromWhitelist(origin) {
+  try {
+    await chrome.permissions.remove({ origins: [origin + '/*'] });
+  } catch { /* 権限がない場合は無視 */ }
+  const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+  await chrome.storage.sync.set({ whitelist: whitelist.filter(o => o !== origin) });
+}
+
 // ============================================================
 // マイグレーション: sync → local への移行
 // ============================================================
