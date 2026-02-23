@@ -5,9 +5,36 @@ const CACHE_VERSION = '1.1';
 const ALLOWED_SITES_RE = /^https:\/\/([^/]*\.marvel\.com|read\.amazon\.co\.jp|read\.amazon\.com|([^/]*\.)?comicbookplus\.com)(\/|$)/;
 
 // ============================================================
+// ホワイトリスト（任意サイト対応）
+// ============================================================
+let whitelistedOrigins = new Set();
+
+async function loadWhitelist() {
+  const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+  whitelistedOrigins = new Set(whitelist);
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.whitelist) {
+    whitelistedOrigins = new Set(changes.whitelist.newValue || []);
+  }
+});
+
+function isSiteAllowed(url) {
+  if (!url) return false;
+  if (ALLOWED_SITES_RE.test(url)) return true;
+  try {
+    const origin = new URL(url).origin;
+    return whitelistedOrigins.has(origin);
+  } catch { return false; }
+}
+
+// ============================================================
 // マイグレーション: sync → local への移行
 // ============================================================
 chrome.runtime.onInstalled.addListener(async (details) => {
+  await loadWhitelist();
+  createContextMenu();
   if (details.reason === 'install' || details.reason === 'update') {
     try {
       const syncData = await chrome.storage.sync.get(['apiKey', 'apiProvider', 'targetLang']);
@@ -28,6 +55,11 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
+chrome.runtime.onStartup.addListener(async () => {
+  await loadWhitelist();
+  createContextMenu();
+});
+
 // ============================================================
 // Port通信ハンドラー（TRANSLATE_IMAGE: 長時間処理のためタイムアウトなしのPortを使用）
 // ============================================================
@@ -35,7 +67,7 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'translate') return;
   const sender = port.sender;
   if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
-  if (sender.tab && !ALLOWED_SITES_RE.test(sender.tab.url || '')) { port.disconnect(); return; }
+  if (sender.tab && !isSiteAllowed(sender.tab.url)) { port.disconnect(); return; }
 
   let portDisconnected = false;
   port.onDisconnect.addListener(() => { portDisconnected = true; void chrome.runtime.lastError; });
@@ -61,7 +93,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ error: '不正な送信元です' });
     return false;
   }
-  if (sender.tab && !ALLOWED_SITES_RE.test(sender.tab.url || '')) {
+  if (sender.tab && !isSiteAllowed(sender.tab.url)) {
     sendResponse({ error: '不正な送信元です' });
     return false;
   }
