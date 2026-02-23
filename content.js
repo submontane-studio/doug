@@ -4,6 +4,9 @@
 (function () {
   'use strict';
 
+  if (window.__dougInitialized) return;
+  window.__dougInitialized = true;
+
   let isTranslating = false;
   let overlayContainer = null;
   let toolbar = null;
