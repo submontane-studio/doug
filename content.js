@@ -513,19 +513,16 @@ JSON配列のみ返してください:
 
   let lastQueueKey = '';  // 前回送信したキューのキー（重複送信防止）
 
-  // セーフモード先読み用：viewport右外にある最も近いBlob URL imgを「次のページ」として返す
+  // セーフモード先読み用：viewport右外にある最も近いBlob URL imgを返す（count枚）
   // Kindleはスライダー方式（前ページ=left外、現在=center、次ページ=right外）のため
   // DOM順ではなく位置ベースで次ページを特定する
-  function findNextBlobImage() {
+  function findNextBlobImages(count) {
     const vw = window.innerWidth;
-    const nextPageImgs = [...document.querySelectorAll('img')]
+    return [...document.querySelectorAll('img')]
       .filter(img => img.src && img.src.startsWith('blob:') && img.complete)
-      .filter(img => {
-        const rect = img.getBoundingClientRect();
-        return rect.left >= vw;
-      })
-      .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-    return nextPageImgs[0] || null;
+      .filter(img => img.getBoundingClientRect().left >= vw)
+      .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+      .slice(0, count);
   }
 
   let safeModePreloadTimer = null;
@@ -537,23 +534,21 @@ JSON配列のみ返してください:
     if (!prefetch) return;
     safeModePreloadTimer = setTimeout(async () => {
       try {
-        const nextImg = findNextBlobImage();
-        console.log('[doug] safeMode prefetch: nextImg=', nextImg ? nextImg.src.substring(0, 60) : 'null');
-        if (!nextImg) return;
-
-        // Canvas変換してBase64取得（Blob URLはCORS制限なし）
-        // captureRasterElement はエラー時にthrowするため、失敗は外側のcatchで捕捉される
-        const imageData = captureRasterElement(nextImg);
-        console.log('[doug] safeMode prefetch: imageData取得完了、background.jsへ送信');
-        // background.jsに送信（内部でキャッシュチェック・session保存）
-        const port = chrome.runtime.connect({ name: 'translate' });
-        port.postMessage({ type: 'TRANSLATE_IMAGE', imageData, imageUrl: nextImg.src });
-        port.onMessage.addListener((msg) => { console.log('[doug] safeMode prefetch: 応答=', JSON.stringify(msg).substring(0, 100)); port.disconnect(); });
-        port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
+        const nextImgs = findNextBlobImages(2);
+        if (nextImgs.length === 0) return;
+        for (const img of nextImgs) {
+          // Canvas変換してBase64取得（Blob URLはCORS制限なし）
+          const imageData = captureRasterElement(img);
+          // background.jsに送信（内部でキャッシュチェック・session保存）
+          const port = chrome.runtime.connect({ name: 'translate' });
+          port.postMessage({ type: 'TRANSLATE_IMAGE', imageData, imageUrl: img.src });
+          port.onMessage.addListener(() => { port.disconnect(); });
+          port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
+        }
       } catch(e) {
         console.error('[doug] safeMode prefetch エラー:', e.message);
       }
-    }, 2000); // 2秒ディレイ（Kindle先読み：Kindleへの追加アクセスなし、Gemini RPMも安全圏）
+    }, 2000); // 2秒ディレイ（先読み：APIへの追加アクセスなし、Gemini RPMも安全圏）
   }
 
   function triggerPrefetch(currentImageUrl) {
@@ -581,7 +576,7 @@ JSON配列のみ返してください:
       }
       if (currentIndex === -1) return;
 
-      // 優先度付きキュー: 現在ページ → 次5 → 前2（最大8ページ）
+      // 優先度付きキュー: 現在ページ → 次2（最大3ページ）
       const queueUrls = [];
       const addIfValid = (idx) => {
         if (idx >= 0 && idx < allPages.length) {
@@ -591,10 +586,8 @@ JSON配列のみ返してください:
 
       // 1. 現在ページ
       addIfValid(currentIndex);
-      // 2. 次ページ × 5
-      for (let i = 1; i <= 5; i++) addIfValid(currentIndex + i);
-      // 3. 前ページ × 2
-      for (let i = 1; i <= 2; i++) addIfValid(currentIndex - i);
+      // 2. 次ページ × 2
+      for (let i = 1; i <= 2; i++) addIfValid(currentIndex + i);
 
       if (queueUrls.length === 0) return;
 
