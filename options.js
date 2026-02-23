@@ -1,0 +1,280 @@
+// options.js - 詳細設定画面ロジック
+
+const $ = (id) => document.getElementById(id);
+
+let isPulling = false;
+
+async function loadWhitelistUI() {
+  const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+  const ul = $('whitelistItems');
+  ul.innerHTML = '';
+  if (whitelist.length === 0) {
+    $('whitelistSection').style.display = 'none';
+    return;
+  }
+  $('whitelistSection').style.display = '';
+  whitelist.forEach(origin => {
+    const tr = document.createElement('tr');
+    const tdOrigin = document.createElement('td');
+    tdOrigin.className = 'whitelist-origin';
+    tdOrigin.textContent = origin.replace(/^https?:\/\//, '');
+    const tdAction = document.createElement('td');
+    tdAction.className = 'whitelist-action';
+    const btn = document.createElement('button');
+    btn.className = 'btn-icon whitelist-remove-btn';
+    btn.title = '削除';
+    btn.textContent = '✕';
+    btn.addEventListener('click', async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin });
+        await loadWhitelistUI();
+      } catch (err) {
+        showStatus('削除に失敗しました: ' + err.message, 'err');
+      }
+    });
+    tdAction.appendChild(btn);
+    tr.appendChild(tdOrigin);
+    tr.appendChild(tdAction);
+    ul.appendChild(tr);
+  });
+}
+
+const PROVIDER_CONFIG = {
+  gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,256}$/, hint: 'Gemini APIキーは "AIza" で始まる39文字程度の英数字です' },
+  claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-[0-9A-Za-z_-]{20,256}$/, hint: 'Claude APIキーは "sk-ant-" で始まる英数字です' },
+  openai: { section: 'openaiKeySection', keyId: 'openaiApiKey', pattern: /^sk-[0-9A-Za-z_-]{20,256}$/, hint: 'OpenAI APIキーは "sk-" で始まる英数字です' },
+  ollama: { section: 'ollamaSection', keyId: null, pattern: null, hint: null },
+};
+
+function updateProviderUI(provider) {
+  Object.values(PROVIDER_CONFIG).forEach(c => {
+    $(c.section).style.display = 'none';
+  });
+  const config = PROVIDER_CONFIG[provider];
+  if (config) {
+    $(config.section).style.display = '';
+  }
+  if (provider === 'ollama') {
+    checkOllamaStatus();
+  }
+}
+
+function isValidOllamaEndpoint(url) {
+  return /^https?:\/\//i.test(url);
+}
+
+async function checkOllamaStatus() {
+  if (isPulling) return;
+  const endpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
+  const model = $('ollamaModel').value;
+  const statusEl = $('ollamaStatus');
+  const installBtn = $('ollamaInstallBtn');
+  const downloadHint = $('ollamaDownloadHint');
+
+  statusEl.textContent = '確認中...';
+  statusEl.className = 'ollama-status';
+  installBtn.style.display = 'none';
+  downloadHint.style.display = 'none';
+
+  if (!isValidOllamaEndpoint(endpoint)) {
+    statusEl.textContent = '⚠ エンドポイントは http:// または https:// で始まる必要があります';
+    statusEl.className = 'ollama-status err';
+    return;
+  }
+
+  try {
+    const res = await fetch(`${endpoint}/api/tags`);
+    if (res.status === 403) {
+      statusEl.textContent = '⚠ Ollama のアクセス拒否 (403) — OLLAMA_ORIGINS の設定が必要です';
+      statusEl.className = 'ollama-status err';
+      downloadHint.innerHTML = 'ターミナルで実行して Ollama を再起動:<br><code>launchctl setenv OLLAMA_ORIGINS "*"</code>';
+      downloadHint.style.display = '';
+      return;
+    }
+    if (!res.ok) throw new Error('接続エラー');
+    const data = await res.json();
+    const models = data.models || [];
+    const installed = models.some(m => m.name === model);
+
+    if (installed) {
+      statusEl.textContent = `✓ Ollama 起動中 / ✓ ${model} 準備完了`;
+      statusEl.className = 'ollama-status ok';
+    } else {
+      statusEl.textContent = `✓ Ollama 起動中 / ${model} 未インストール`;
+      statusEl.className = 'ollama-status warn';
+      installBtn.textContent = `${model} をインストール`;
+      installBtn.style.display = '';
+    }
+  } catch {
+    statusEl.textContent = '⚠ Ollama が起動していません';
+    statusEl.className = 'ollama-status err';
+    downloadHint.style.display = '';
+  }
+}
+
+async function pullModel() {
+  const endpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
+  const model = $('ollamaModel').value;
+  const progressEl = $('ollamaProgress');
+  const progressFill = $('ollamaProgressFill');
+  const progressText = $('ollamaProgressText');
+  const installBtn = $('ollamaInstallBtn');
+
+  if (!isValidOllamaEndpoint(endpoint)) {
+    showStatus('エンドポイントは http:// または https:// で始まる必要があります', 'err');
+    return;
+  }
+
+  isPulling = true;
+  installBtn.disabled = true;
+  progressEl.style.display = '';
+  progressFill.style.width = '0%';
+  progressText.textContent = 'ダウンロード準備中...';
+
+  try {
+    const res = await fetch(`${endpoint}/api/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, stream: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    if (!res.body) throw new Error('レスポンスボディが取得できません');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const lines = decoder.decode(value, { stream: true }).split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.total && obj.completed) {
+            const pct = Math.round((obj.completed / obj.total) * 100);
+            progressFill.style.width = pct + '%';
+            const gb = (obj.total / 1e9).toFixed(1);
+            const doneGb = (obj.completed / 1e9).toFixed(1);
+            progressText.textContent = `${doneGb} GB / ${gb} GB (${pct}%)`;
+          } else if (obj.status) {
+            progressText.textContent = obj.status;
+          }
+        } catch { /* NDJSON の不完全行は無視 */ }
+      }
+    }
+
+    progressFill.style.width = '100%';
+    progressText.textContent = 'インストール完了！';
+    installBtn.style.display = 'none';
+    await checkOllamaStatus();
+  } catch (err) {
+    showStatus(`インストールに失敗しました: ${err.message}`, 'err');
+  } finally {
+    isPulling = false;
+    installBtn.disabled = false;
+    if (progressFill.style.width !== '100%') {
+      progressEl.style.display = 'none';
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadWhitelistUI();
+
+  const settings = await chrome.storage.local.get({
+    apiProvider: 'gemini',
+    geminiApiKey: '',
+    claudeApiKey: '',
+    openaiApiKey: '',
+    geminiModel: 'gemini-2.5-flash-lite',
+    claudeModel: 'claude-sonnet-4-6',
+    openaiModel: 'gpt-5.2-2025-12-11',
+    ollamaModel: 'qwen3-vl:8b',
+    ollamaEndpoint: 'http://localhost:11434',
+    prefetch: false,
+    imagePreprocess: true,
+  });
+
+  $('apiProvider').value = settings.apiProvider;
+  $('geminiApiKey').value = settings.geminiApiKey;
+  $('claudeApiKey').value = settings.claudeApiKey;
+  $('openaiApiKey').value = settings.openaiApiKey;
+  $('geminiModel').value = settings.geminiModel;
+  $('claudeModel').value = settings.claudeModel;
+  $('openaiModel').value = settings.openaiModel;
+  $('ollamaModel').value = settings.ollamaModel;
+  $('ollamaEndpoint').value = settings.ollamaEndpoint;
+  $('prefetch').checked = settings.prefetch;
+  $('imagePreprocess').checked = settings.imagePreprocess;
+
+  updateProviderUI(settings.apiProvider);
+
+  // プロバイダー切替
+  $('apiProvider').addEventListener('change', () => {
+    updateProviderUI($('apiProvider').value);
+  });
+
+  // APIキー表示/非表示トグル
+  document.querySelectorAll('.toggle-key-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = $(btn.dataset.target);
+      input.type = input.type === 'password' ? 'text' : 'password';
+    });
+  });
+
+  // Ollama: モデル変更・エンドポイント変更で再チェック
+  $('ollamaModel').addEventListener('change', checkOllamaStatus);
+  $('ollamaEndpoint').addEventListener('blur', checkOllamaStatus);
+
+  // Ollama: インストールボタン
+  $('ollamaInstallBtn').addEventListener('click', pullModel);
+
+  // 保存ボタン
+  $('saveBtn').addEventListener('click', async () => {
+    const provider = $('apiProvider').value;
+
+    // Ollama 以外は API キーをバリデーション
+    if (provider !== 'ollama') {
+      const config = PROVIDER_CONFIG[provider];
+      const apiKey = $(config.keyId).value.trim();
+      if (!apiKey) {
+        showStatus('APIキーを入力してください', 'err');
+        return;
+      }
+      if (config.pattern && !config.pattern.test(apiKey)) {
+        showStatus(config.hint, 'err');
+        return;
+      }
+    }
+
+    const ollamaEndpoint = ($('ollamaEndpoint').value || 'http://localhost:11434').trim();
+    if (!isValidOllamaEndpoint(ollamaEndpoint)) {
+      showStatus('Ollama エンドポイントは http:// または https:// で始まる必要があります', 'err');
+      return;
+    }
+
+    await chrome.storage.local.set({
+      apiProvider: provider,
+      geminiApiKey: $('geminiApiKey').value.trim(),
+      claudeApiKey: $('claudeApiKey').value.trim(),
+      openaiApiKey: $('openaiApiKey').value.trim(),
+      geminiModel: $('geminiModel').value,
+      claudeModel: $('claudeModel').value,
+      openaiModel: $('openaiModel').value,
+      ollamaModel: $('ollamaModel').value,
+      ollamaEndpoint,
+      prefetch: $('prefetch').checked,
+      imagePreprocess: $('imagePreprocess').checked,
+    });
+    showStatus('設定を保存しました', 'ok');
+  });
+});
+
+function showStatus(msg, type) {
+  const el = $('status');
+  el.textContent = msg;
+  el.style.color = type === 'err' ? '#f44336' : '#4caf50';
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 5000);
+}

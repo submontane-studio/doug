@@ -310,7 +310,7 @@ JSON配列のみ返してください:
   // ============================================================
   // 画像キャプチャ
   // ============================================================
-  async function captureSvgImage(info) {
+  async function captureSvgImage(info, preprocess = false) {
     const imageEl = info.element;
 
     // まずCanvasで既レンダリング済み画像をキャプチャ（URLトークン失効でも動作する）
@@ -326,7 +326,10 @@ JSON配列のみ返してください:
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      const ctx = canvas.getContext('2d');
+      if (preprocess) ctx.filter = 'contrast(1.4) brightness(1.05)';
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      ctx.filter = 'none';
       bitmap.close();
       return canvas.toDataURL('image/webp', 0.65);
     } catch {
@@ -347,7 +350,7 @@ JSON配列のみ返してください:
     return response.imageData;
   }
 
-  function captureRasterElement(element) {
+  function captureRasterElement(element, preprocess = false) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const srcW = element instanceof HTMLCanvasElement ? element.width : (element.naturalWidth || element.width);
@@ -364,7 +367,9 @@ JSON配列のみ返してください:
     canvas.width = w;
     canvas.height = h;
     try {
+      if (preprocess) ctx.filter = 'contrast(1.4) brightness(1.05)';
       ctx.drawImage(element, 0, 0, w, h);
+      ctx.filter = 'none';
       return canvas.toDataURL('image/webp', 0.65);
     } catch (err) {
       if (err.name === 'SecurityError') throw err;
@@ -373,9 +378,10 @@ JSON配列のみ返してください:
   }
 
   async function captureComic(info) {
-    if (info.type === 'svg') return captureSvgImage(info);
+    const { imagePreprocess = true } = await chrome.storage.local.get({ imagePreprocess: true });
+    if (info.type === 'svg') return captureSvgImage(info, imagePreprocess);
     try {
-      return captureRasterElement(info.element);
+      return captureRasterElement(info.element, imagePreprocess);
     } catch (err) {
       // SecurityError (CORS) → URLフェッチにフォールバック（captureSvgImageと同パターン）
       if (err.name !== 'SecurityError') throw err;
@@ -1174,8 +1180,22 @@ JSON配列のみ返してください:
     prefetchKeepAliveTimeout = null;
   }
 
-  // 先読み進捗の受信
+  // background.js からのメッセージ受信
   chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'SITE_DISABLED') {
+      // サイトがホワイトリストから削除された → UI全撤去
+      clearOverlays();
+      stopPrefetchKeepAlive();
+      if (toolbar) { toolbar.remove(); toolbar = null; }
+      const bar = document.getElementById('mut-prefetch-bar');
+      if (bar) bar.remove();
+      const notif = document.getElementById('mut-notification');
+      if (notif) notif.remove();
+      // 再有効化時に再注入できるようフラグをリセット
+      window.__dougInitialized = false;
+      return;
+    }
+
     if (message.type === 'PRELOAD_PROGRESS') {
       const bar = document.getElementById('mut-prefetch-bar');
       const fill = document.getElementById('mut-prefetch-fill');

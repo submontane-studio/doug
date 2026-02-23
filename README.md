@@ -120,7 +120,7 @@ APIの429応答時は最大3回リトライ。`Retry-After` ヘッダーがあ�
 
 ### ページ検出
 
-`MutationObserver` を3系統使ってページ遷移を検知します（DOM追加監視・SVG `<image>` の属性変化・通常 `<img>` の src 変化）。Kindle等のBlob URL画像はviewport外の位置情報をもとに次ページを特定します。
+`MutationObserver` を3系統使ってページ遷移を検知します（DOM追加監視・SVG `<image>` の属性変化・通常 `<img>` の src 変化）。Blob URL画像はviewport外の位置情報をもとに次ページを特定します。
 
 ### オーバーレイ描画
 

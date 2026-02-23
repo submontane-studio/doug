@@ -46,7 +46,8 @@ async function saveToWhitelist(origin, tabId) {
     await chrome.storage.sync.set({ whitelist });
     // storage.onChanged がキャッシュを更新する
   }
-  if (tabId != null) await injectToTab(tabId);
+  // リロードで tabs.onUpdated → injectToTab の確実な経路を使う
+  if (tabId != null) await chrome.tabs.reload(tabId);
 }
 
 async function removeFromWhitelist(origin) {
@@ -55,6 +56,13 @@ async function removeFromWhitelist(origin) {
   } catch { /* 権限がない場合は無視 */ }
   const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
   await chrome.storage.sync.set({ whitelist: whitelist.filter(o => o !== origin) });
+  // 無効化されたオリジンのタブにteardownを通知
+  try {
+    const tabs = await chrome.tabs.query({ url: origin + '/*' });
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { type: 'SITE_DISABLED' }).catch(() => {});
+    }
+  } catch { /* タブが見つからない場合は無視 */ }
 }
 
 // ============================================================
@@ -116,67 +124,89 @@ chrome.runtime.onConnect.addListener(async (port) => {
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはホワイトリスト登録済みドメインのみ許可
-  // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
+  // 送信元検証: 自拡張IDを確認（同期・高速パス）
   if (sender.id !== chrome.runtime.id) {
     sendResponse({ error: '不正な送信元です' });
     return false;
   }
-  if (sender.tab && !isSiteAllowed(sender.tab.url)) {
-    sendResponse({ error: '不正な送信元です' });
-    return false;
-  }
 
-  if (message.type === 'KEEP_ALIVE') {
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  if (message.type === 'FETCH_IMAGE') {
-    if (!isAllowedImageUrl(message.url)) {
-      sendResponse({ error: '許可されていない画像URLです' });
-      return false;
+  // Service Worker再起動後にwhitelistedOriginsが空になる場合を考慮して非同期で処理
+  (async () => {
+    if (whitelistedOrigins.size === 0) await loadWhitelist();
+    // タブからのメッセージはホワイトリスト登録済みドメインのみ許可
+    // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
+    if (sender.tab && !isSiteAllowed(sender.tab.url)) {
+      sendResponse({ error: '不正な送信元です' });
+      return;
     }
-    fetchImageAsDataUrl(message.url)
-      .then(imageData => sendResponse({ imageData }))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
 
-  if (message.type === 'PRELOAD_QUEUE') {
-    handlePreloadQueue(message.imageUrls, sender.tab?.id);
-    sendResponse({ ok: true });
-    return false;
-  }
+    if (message.type === 'KEEP_ALIVE') {
+      sendResponse({ ok: true });
+      return;
+    }
 
-  if (message.type === 'ADD_TO_WHITELIST') {
-    // chrome.permissions.request は popup.js 側で完了済み
-    saveToWhitelist(message.origin, message.tabId)
-      .then(() => sendResponse({ ok: true }))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
+    if (message.type === 'FETCH_IMAGE') {
+      if (!isAllowedImageUrl(message.url)) {
+        sendResponse({ error: '許可されていない画像URLです' });
+        return;
+      }
+      try {
+        const imageData = await fetchImageAsDataUrl(message.url);
+        sendResponse({ imageData });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+      return;
+    }
 
-  if (message.type === 'REMOVE_FROM_WHITELIST') {
-    removeFromWhitelist(message.origin)
-      .then(() => sendResponse({ ok: true }))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
+    if (message.type === 'PRELOAD_QUEUE') {
+      handlePreloadQueue(message.imageUrls, sender.tab?.id);
+      sendResponse({ ok: true });
+      return;
+    }
 
-  if (message.type === 'GET_WHITELIST') {
-    chrome.storage.sync.get('whitelist')
-      .then(({ whitelist = [] }) => sendResponse({ whitelist }))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
+    if (message.type === 'ADD_TO_WHITELIST') {
+      // chrome.permissions.request は popup.js 側で完了済み
+      try {
+        await saveToWhitelist(message.origin, message.tabId);
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+      return;
+    }
 
-  if (message.type === 'ANALYZE_SITE') {
-    analyzeScreenshot(message.tabId)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
+    if (message.type === 'REMOVE_FROM_WHITELIST') {
+      try {
+        await removeFromWhitelist(message.origin);
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+      return;
+    }
+
+    if (message.type === 'GET_WHITELIST') {
+      try {
+        const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+        sendResponse({ whitelist });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+      return;
+    }
+
+    if (message.type === 'ANALYZE_SITE') {
+      try {
+        const result = await analyzeScreenshot(message.tabId);
+        sendResponse(result);
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+      return;
+    }
+  })();
+  return true; // 非同期応答のためチャネルを保持
 });
 
 // ============================================================
@@ -280,6 +310,7 @@ const SETTINGS_DEFAULTS = {
   ollamaEndpoint: 'http://localhost:11434',
   targetLang: 'ja',
   prefetch: false,
+  imagePreprocess: true,
 };
 let settingsCache = null;
 
