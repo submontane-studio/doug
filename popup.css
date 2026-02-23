@@ -219,3 +219,66 @@ h1 {
   border-radius: 3px;
   transition: width 0.3s ease;
 }
+
+/* 現在のサイト行 */
+.current-site-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.current-site-host {
+  font-size: 13px;
+  color: #e0e0e0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.current-site-row .btn-primary,
+.current-site-row .btn-secondary {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* カスタムサイトリスト */
+.whitelist-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.whitelist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+.whitelist-origin {
+  font-size: 12px;
+  color: #ccc;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.whitelist-remove-btn {
+  position: static;
+  transform: none;
+  font-size: 11px;
+  color: #888;
+  padding: 2px 6px;
+}
+.whitelist-remove-btn:hover {
+  color: #f44336;
+  opacity: 1;
+}

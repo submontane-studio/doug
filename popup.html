@@ -10,6 +10,14 @@
   <div class="container">
     <h1>Doug</h1>
 
+    <div class="section current-site-section" id="currentSiteSection" style="display:none">
+      <label>現在のサイト</label>
+      <div class="current-site-row">
+        <span id="currentSiteHost" class="current-site-host">—</span>
+        <button id="toggleSiteBtn" class="btn-primary" style="display:none"></button>
+      </div>
+    </div>
+
     <div class="section">
       <label for="apiProvider">APIプロバイダー:</label>
       <select id="apiProvider">
@@ -116,6 +124,11 @@
         <input type="checkbox" id="prefetch" checked>
         <span>先読み翻訳（通常サイト: 次5・前2ページ / Kindle: 次の1ページ）</span>
       </label>
+    </div>
+
+    <div class="section" id="whitelistSection" style="display:none">
+      <label>カスタムサイト</label>
+      <ul id="whitelistItems" class="whitelist-list"></ul>
     </div>
 
     <div class="actions">
