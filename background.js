@@ -765,6 +765,136 @@ async function translateImageWithOllama(endpoint, model, imageData, prompt, imag
   return parseVisionResponse(content, imageDims);
 }
 
+// ============================================================
+// コミック解析（ホワイトリスト登録前の事前判定）
+// ============================================================
+
+// 現在選択中プロバイダーの最軽量モデルを返す
+function getLightestModel(settings) {
+  const p = settings.apiProvider;
+  if (p === 'gemini' && settings.geminiApiKey)
+    return { provider: 'gemini', apiKey: settings.geminiApiKey, model: 'gemini-2.0-flash-lite' };
+  if (p === 'claude' && settings.claudeApiKey)
+    return { provider: 'claude', apiKey: settings.claudeApiKey, model: 'claude-haiku-4-5-20251001' };
+  if (p === 'openai' && settings.openaiApiKey)
+    return { provider: 'openai', apiKey: settings.openaiApiKey, model: 'gpt-4o-mini' };
+  if (p === 'ollama')
+    return { provider: 'ollama', endpoint: settings.ollamaEndpoint || 'http://localhost:11434', model: settings.ollamaModel };
+  return null;
+}
+
+// 各API：画像を送ってテキスト応答を得る（YES/NO判定用）
+async function callGeminiText(apiKey, parsed, prompt, model) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const body = JSON.stringify({
+    contents: [{ parts: [
+      { inline_data: { mime_type: parsed.mimeType, data: parsed.base64Data } },
+      { text: prompt },
+    ]}],
+    generationConfig: { temperature: 0, maxOutputTokens: 10 },
+  });
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body,
+  }, 'Gemini');
+  if (!res.ok) throw new Error(`Gemini API エラー (${res.status})`);
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function callClaudeText(apiKey, parsed, prompt, model) {
+  const url = 'https://api.anthropic.com/v1/messages';
+  const body = JSON.stringify({
+    model,
+    max_tokens: 10,
+    messages: [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: parsed.mimeType, data: parsed.base64Data } },
+      { type: 'text', text: prompt },
+    ]}],
+  });
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body,
+  }, 'Claude');
+  if (!res.ok) throw new Error(`Claude API エラー (${res.status})`);
+  const data = await res.json();
+  return data.content?.[0]?.text || '';
+}
+
+async function callOpenAIText(apiKey, imageDataUrl, prompt, model) {
+  const url = 'https://api.openai.com/v1/chat/completions';
+  const body = JSON.stringify({
+    model,
+    max_tokens: 10,
+    messages: [{ role: 'user', content: [
+      { type: 'image_url', image_url: { url: imageDataUrl } },
+      { type: 'text', text: prompt },
+    ]}],
+  });
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body,
+  }, 'ChatGPT');
+  if (!res.ok) throw new Error(`OpenAI API エラー (${res.status})`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function callOllamaText(endpoint, model, imageDataUrl, prompt) {
+  const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
+  let res;
+  try {
+    res = await fetch(`${endpoint}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt, images: [base64Data] }],
+        stream: false,
+      }),
+    });
+  } catch {
+    throw new Error('Ollama が起動していません');
+  }
+  if (!res.ok) throw new Error(`Ollama エラー (${res.status})`);
+  const data = await res.json();
+  return data.message?.content || '';
+}
+
+// スクリーンショットを撮ってAIにコミック判定させる
+async function analyzeScreenshot(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 80 });
+
+  const settings = await getSettings();
+  const modelInfo = getLightestModel(settings);
+  if (!modelInfo) throw new Error('利用可能なAIプロバイダーがありません。設定画面でAPIキーを入力してください。');
+
+  const prompt = 'この画像はコミックまたはマンガのページですか？吹き出しやセリフが含まれていますか？"YES"または"NO"のみで答えてください。';
+  const parsed = parseImageDataUrl(dataUrl);
+
+  let answer;
+  if (modelInfo.provider === 'gemini') {
+    answer = await callGeminiText(modelInfo.apiKey, parsed, prompt, modelInfo.model);
+  } else if (modelInfo.provider === 'claude') {
+    answer = await callClaudeText(modelInfo.apiKey, parsed, prompt, modelInfo.model);
+  } else if (modelInfo.provider === 'openai') {
+    answer = await callOpenAIText(modelInfo.apiKey, dataUrl, prompt, modelInfo.model);
+  } else {
+    answer = await callOllamaText(modelInfo.endpoint, modelInfo.model, dataUrl, prompt);
+  }
+
+  return { isComic: /yes/i.test(answer) };
+}
+
 // 翻訳テキストから「」と末尾の。を除去
 function cleanTranslatedText(text) {
   if (!text) return text;
