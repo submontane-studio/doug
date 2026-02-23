@@ -171,6 +171,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ error: err.message }));
     return true;
   }
+
+  if (message.type === 'ANALYZE_SITE') {
+    analyzeScreenshot(message.tabId)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
 });
 
 // ============================================================
