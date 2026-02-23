@@ -142,6 +142,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+
+  if (message.type === 'ADD_TO_WHITELIST') {
+    // chrome.permissions.request は popup.js 側で完了済み
+    saveToWhitelist(message.origin, message.tabId)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'REMOVE_FROM_WHITELIST') {
+    removeFromWhitelist(message.origin)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_WHITELIST') {
+    chrome.storage.sync.get('whitelist')
+      .then(({ whitelist = [] }) => sendResponse({ whitelist }))
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
 });
 
 // ============================================================
