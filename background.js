@@ -158,6 +158,36 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // ============================================================
+// コンテキストメニュー（右クリック: このサイトで翻訳 ON/OFF）
+// ============================================================
+function createContextMenu() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'doug-toggle-site',
+      title: 'Doug: このサイトで翻訳 ON/OFF',
+      contexts: ['page'],
+    });
+  });
+}
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== 'doug-toggle-site') return;
+  if (!tab?.url) return;
+  try {
+    const origin = new URL(tab.url).origin;
+    if (['chrome:', 'chrome-extension:', 'about:'].includes(new URL(tab.url).protocol)) return;
+    if (whitelistedOrigins.has(origin)) {
+      await removeFromWhitelist(origin);
+    } else {
+      const granted = await chrome.permissions.request({ origins: [origin + '/*'] });
+      if (granted) await saveToWhitelist(origin, tab.id);
+    }
+  } catch (err) {
+    console.error('[doug] コンテキストメニュー処理エラー:', err.message);
+  }
+});
+
+// ============================================================
 // 画像fetch
 // ============================================================
 // FETCH_IMAGE で許可する画像ホスト
