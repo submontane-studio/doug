@@ -40,6 +40,8 @@ async function injectToTab(tabId) {
 }
 
 async function saveToWhitelist(origin, tabId) {
+  // origin の形式を検証（https://example.com 形式のみ許可）
+  if (typeof origin !== 'string' || !/^https?:\/\/[^/]+$/.test(origin)) return;
   const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
   if (!whitelist.includes(origin)) {
     whitelist.push(origin);
