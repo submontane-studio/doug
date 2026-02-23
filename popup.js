@@ -47,9 +47,13 @@ async function loadWhitelistUI() {
     btn.title = '削除';
     btn.textContent = '✕';
     btn.addEventListener('click', async () => {
-      await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin });
-      await loadWhitelistUI();
-      if (origin === currentOrigin) await initCurrentSite();
+      try {
+        await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin });
+        await loadWhitelistUI();
+        if (origin === currentOrigin) await initCurrentSite();
+      } catch (err) {
+        showStatus('削除に失敗しました: ' + err.message, 'err');
+      }
     });
     li.appendChild(span);
     li.appendChild(btn);
