@@ -3,6 +3,59 @@
 const $ = (id) => document.getElementById(id);
 
 let isPulling = false;
+let currentOrigin = null;
+let currentTabId = null;
+
+async function initCurrentSite() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url) return;
+    const url = new URL(tab.url);
+    if (!['http:', 'https:'].includes(url.protocol)) return;
+    currentOrigin = url.origin;
+    currentTabId = tab.id;
+
+    $('currentSiteHost').textContent = url.hostname;
+
+    const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+    const isWhitelisted = whitelist.includes(currentOrigin);
+    const btn = $('toggleSiteBtn');
+    btn.textContent = isWhitelisted ? 'このサイトを無効化' : 'このサイトで翻訳を有効化';
+    btn.className = isWhitelisted ? 'btn-secondary' : 'btn-primary';
+    btn.style.display = '';
+    $('currentSiteSection').style.display = '';
+  } catch { /* 無効なURLは無視 */ }
+}
+
+async function loadWhitelistUI() {
+  const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+  const ul = $('whitelistItems');
+  ul.innerHTML = '';
+  if (whitelist.length === 0) {
+    $('whitelistSection').style.display = 'none';
+    return;
+  }
+  $('whitelistSection').style.display = '';
+  whitelist.forEach(origin => {
+    const li = document.createElement('li');
+    li.className = 'whitelist-item';
+    const span = document.createElement('span');
+    span.className = 'whitelist-origin';
+    span.textContent = origin.replace(/^https?:\/\//, '');
+    const btn = document.createElement('button');
+    btn.className = 'btn-icon whitelist-remove-btn';
+    btn.title = '削除';
+    btn.textContent = '✕';
+    btn.addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin });
+      await loadWhitelistUI();
+      if (origin === currentOrigin) await initCurrentSite();
+    });
+    li.appendChild(span);
+    li.appendChild(btn);
+    ul.appendChild(li);
+  });
+}
 
 const PROVIDER_CONFIG = {
   gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,256}$/, hint: 'Gemini APIキーは "AIza" で始まる39文字程度の英数字です' },
@@ -146,6 +199,9 @@ async function pullModel() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await initCurrentSite();
+  await loadWhitelistUI();
+
   const settings = await chrome.storage.local.get({
     apiProvider: 'gemini',
     geminiApiKey: '',
@@ -173,6 +229,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('prefetch').checked = settings.prefetch;
 
   updateProviderUI(settings.apiProvider);
+
+  // 現在のサイト 有効化/無効化ボタン
+  $('toggleSiteBtn').addEventListener('click', async () => {
+    if (!currentOrigin) return;
+    const { whitelist = [] } = await chrome.storage.sync.get('whitelist');
+    const isWhitelisted = whitelist.includes(currentOrigin);
+
+    if (isWhitelisted) {
+      await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin: currentOrigin });
+      showStatus('このサイトを無効化しました', 'ok');
+    } else {
+      // chrome.permissions.request はユーザージェスチャー（クリック）内で直接呼ぶ必要あり
+      let granted = false;
+      try {
+        granted = await chrome.permissions.request({ origins: [currentOrigin + '/*'] });
+      } catch (err) {
+        showStatus('権限の取得に失敗しました: ' + err.message, 'err');
+        return;
+      }
+      if (!granted) {
+        showStatus('権限が拒否されました', 'err');
+        return;
+      }
+      await chrome.runtime.sendMessage({ type: 'ADD_TO_WHITELIST', origin: currentOrigin, tabId: currentTabId });
+      showStatus('このサイトで翻訳を有効化しました', 'ok');
+    }
+
+    await initCurrentSite();
+    await loadWhitelistUI();
+  });
 
   // プロバイダー切替
   $('apiProvider').addEventListener('change', () => {
