@@ -243,25 +243,77 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isWhitelisted) {
       await chrome.runtime.sendMessage({ type: 'REMOVE_FROM_WHITELIST', origin: currentOrigin });
       showStatus('このサイトを無効化しました', 'ok');
-    } else {
-      // chrome.permissions.request はユーザージェスチャー（クリック）内で直接呼ぶ必要あり
-      let granted = false;
-      try {
-        granted = await chrome.permissions.request({ origins: [currentOrigin + '/*'] });
-      } catch (err) {
-        showStatus('権限の取得に失敗しました: ' + err.message, 'err');
-        return;
-      }
-      if (!granted) {
-        showStatus('権限が拒否されました', 'err');
-        return;
-      }
-      await chrome.runtime.sendMessage({ type: 'ADD_TO_WHITELIST', origin: currentOrigin, tabId: currentTabId });
-      showStatus('このサイトで翻訳を有効化しました', 'ok');
+      await initCurrentSite();
+      await loadWhitelistUI();
+      return;
     }
 
+    // 権限取得（ユーザージェスチャー内で直接呼ぶ必要あり）
+    let granted = false;
+    try {
+      granted = await chrome.permissions.request({ origins: [currentOrigin + '/*'] });
+    } catch (err) {
+      showStatus('権限の取得に失敗しました: ' + err.message, 'err');
+      return;
+    }
+    if (!granted) {
+      showStatus('権限が拒否されました', 'err');
+      return;
+    }
+
+    // 解析中表示
+    const btn = $('toggleSiteBtn');
+    btn.textContent = '解析中...';
+    btn.disabled = true;
+
+    let isComic = false;
+    let analyzeErrorMsg = null;
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'ANALYZE_SITE', tabId: currentTabId });
+      if (result.error) throw new Error(result.error);
+      isComic = result.isComic;
+    } catch (err) {
+      analyzeErrorMsg = err.message;
+    }
+
+    btn.textContent = 'このサイトで翻訳を有効化';
+    btn.disabled = false;
+
+    if (isComic) {
+      // YES → 自動登録
+      await chrome.runtime.sendMessage({ type: 'ADD_TO_WHITELIST', origin: currentOrigin, tabId: currentTabId });
+      showStatus('このサイトで翻訳を有効化しました', 'ok');
+      await initCurrentSite();
+      await loadWhitelistUI();
+    } else {
+      // NO or エラー → 選択肢を表示
+      $('analyzeResultMsg').textContent = analyzeErrorMsg
+        ? `解析中にエラーが発生しました: ${analyzeErrorMsg}`
+        : 'コミックページが検出されませんでした。';
+      $('analyzeResultSection').style.display = '';
+      btn.style.display = 'none';
+    }
+  });
+
+  // 解析を無視して登録ボタン
+  $('forceRegisterBtn').addEventListener('click', async () => {
+    $('analyzeResultSection').style.display = 'none';
+    $('toggleSiteBtn').style.display = '';
+    await chrome.runtime.sendMessage({ type: 'ADD_TO_WHITELIST', origin: currentOrigin, tabId: currentTabId });
+    showStatus('このサイトで翻訳を有効化しました', 'ok');
     await initCurrentSite();
     await loadWhitelistUI();
+  });
+
+  // キャンセルボタン
+  $('cancelRegisterBtn').addEventListener('click', async () => {
+    $('analyzeResultSection').style.display = 'none';
+    $('toggleSiteBtn').style.display = '';
+    // 取得した権限を解放
+    try {
+      await chrome.permissions.remove({ origins: [currentOrigin + '/*'] });
+    } catch { /* 無視 */ }
+    showStatus('キャンセルしました', 'ok');
   });
 
   // プロバイダー切替
