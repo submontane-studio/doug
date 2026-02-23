@@ -112,7 +112,12 @@ chrome.runtime.onConnect.addListener(async (port) => {
   port.onMessage.addListener(async (message) => {
     if (message.type !== 'TRANSLATE_IMAGE') return;
     try {
-      const result = await handleImageTranslation(message.imageData, message.imageUrl, message.imageDims);
+      const result = await handleImageTranslation(
+        message.imageData,
+        message.imageUrl,
+        message.imageDims,
+        { forceRefresh: !!message.forceRefresh }
+      );
       if (!portDisconnected) port.postMessage(result);
     } catch (err) {
       if (!portDisconnected) port.postMessage({ error: err.message });
@@ -452,6 +457,15 @@ const LANG_NAMES = {
 const PROVIDER_LABELS = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT', ollama: 'Ollama' };
 const PROVIDER_KEY_MAP = { gemini: 'geminiApiKey', claude: 'claudeApiKey', openai: 'openaiApiKey', ollama: null };
 
+async function incrementApiStats(provider) {
+  try {
+    const { apiStats = {} } = await chrome.storage.local.get('apiStats');
+    apiStats[provider] = (apiStats[provider] || 0) + 1;
+    if (!apiStats.lastReset) apiStats.lastReset = Date.now();
+    await chrome.storage.local.set({ apiStats });
+  } catch { /* storage エラーは無視 */ }
+}
+
 async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
   const settings = await getSettings();
   const provider = settings.apiProvider || 'gemini';
@@ -461,8 +475,8 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
     ? await computeImageDataHash(imageData)
     : imageUrl;
 
-  // キャッシュ確認
-  if (cacheKey) {
+  // キャッシュ確認（forceRefresh 時はスキップ）
+  if (cacheKey && !options?.forceRefresh) {
     const cached = await getCachedTranslation(cacheKey, settings.targetLang);
     if (cached) {
       return { translations: cached, fromCache: true };
@@ -505,6 +519,8 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
       await saveCachedTranslation(cacheKey, settings.targetLang, translations);
     }
 
+    // 翻訳成功時のみカウント（キャッシュヒット・エラー時はカウントしない）
+    await incrementApiStats(provider);
     return { translations };
   } catch (err) {
     // APIキー等の機密情報が含まれないようサニタイズしてから返す

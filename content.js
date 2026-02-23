@@ -135,7 +135,7 @@ JSON配列のみ返してください:
   // ============================================================
   // Vision API 翻訳（画像を直接送信）
   // ============================================================
-  async function translateImage(imageDataUrl, imageUrl) {
+  async function translateImage(imageDataUrl, imageUrl, forceRefresh = false) {
     // Ollama は content script から直接呼び出す（Service Worker タイムアウト回避）
     const { apiProvider } = await chrome.storage.local.get({ apiProvider: 'gemini' });
     if (apiProvider === 'ollama') {
@@ -149,7 +149,7 @@ JSON配列のみ返してください:
         try { chrome.runtime.sendMessage({ type: 'KEEP_ALIVE' }).catch(() => {}); }
         catch { clearInterval(keepAliveId); handleContextInvalidated(); }
       }, 10000);
-      port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl });
+      port.postMessage({ type: 'TRANSLATE_IMAGE', imageData: imageDataUrl, imageUrl: imageUrl, forceRefresh });
       port.onMessage.addListener((response) => {
         clearInterval(keepAliveId);
         port.disconnect();
@@ -405,7 +405,7 @@ JSON配列のみ返してください:
   // ============================================================
   // 翻訳メイン処理
   // ============================================================
-  async function translateCurrentPage() {
+  async function translateCurrentPage(forceRefresh = false) {
     if (isTranslating) return;
 
     const comicInfo = findLargestVisibleImage();
@@ -445,7 +445,7 @@ JSON配列のみ返してください:
       // Gemini Vision でOCR＋翻訳を一括処理
       showNotification('テキストを認識・翻訳中...', 'info');
       if (fill) fill.style.width = '60%';
-      const response = await translateImage(imageData, imageUrl);
+      const response = await translateImage(imageData, imageUrl, forceRefresh);
 
       if (!response || response.error) {
         showNotification(response?.error || '翻訳応答がありません', 'error');
@@ -818,6 +818,19 @@ JSON配列のみ返してください:
       overlayContainer.appendChild(overlay);
     });
 
+    // 再翻訳ボタン（右下にホバーで表示）
+    const reloadBtn = document.createElement('button');
+    reloadBtn.className = 'mut-reload-btn';
+    reloadBtn.title = '再翻訳（キャッシュをスキップ）';
+    reloadBtn.insertAdjacentHTML('afterbegin',
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<path d="M23 4v6h-6"/>' +
+      '<path d="M1 20v-6h6"/>' +
+      '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>' +
+      '</svg>');
+    reloadBtn.addEventListener('click', () => translateCurrentPage(true));
+    overlayContainer.appendChild(reloadBtn);
+
     getUIParent().appendChild(overlayContainer);
     overlaysVisible = true;
     // ブラウザのレイアウト確定後にフォントフィットを実行
@@ -962,10 +975,32 @@ JSON配列のみ返してください:
     const scrollHandler = () => updatePosition();
     window.addEventListener('scroll', scrollHandler, { passive: true });
     window.addEventListener('resize', scrollHandler, { passive: true });
+
+    // マウス位置でリロードボタンを表示/非表示
+    let reloadHideTimer = null;
+    const mouseMoveHandler = (e) => {
+      if (!overlayContainer) return;
+      const btn = overlayContainer.querySelector('.mut-reload-btn');
+      if (!btn) return;
+      const r = targetEl.getBoundingClientRect();
+      const inRect = e.clientX >= r.left && e.clientX <= r.right &&
+                     e.clientY >= r.top  && e.clientY <= r.bottom;
+      if (inRect) {
+        clearTimeout(reloadHideTimer);
+        btn.classList.add('mut-reload-visible');
+      } else {
+        clearTimeout(reloadHideTimer);
+        reloadHideTimer = setTimeout(() => btn.classList.remove('mut-reload-visible'), 300);
+      }
+    };
+    document.addEventListener('mousemove', mouseMoveHandler, { passive: true });
+
     overlayContainer._cleanup = () => {
       resizeObserver.disconnect();
       window.removeEventListener('scroll', scrollHandler);
       window.removeEventListener('resize', scrollHandler);
+      document.removeEventListener('mousemove', mouseMoveHandler);
+      clearTimeout(reloadHideTimer);
     };
   }
 

@@ -255,3 +255,32 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* 再翻訳ボタン（オーバーレイコンテナ右下・ホバーで表示） */
+.mut-reload-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(26, 26, 46, 0.85);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s;
+  pointer-events: none;
+  z-index: 1;
+}
+.mut-reload-btn.mut-reload-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mut-reload-btn:hover {
+  background: rgba(26, 26, 46, 1);
+}

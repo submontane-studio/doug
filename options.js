@@ -39,6 +39,47 @@ async function loadWhitelistUI() {
   });
 }
 
+async function loadApiStats() {
+  const { apiStats = {} } = await chrome.storage.local.get('apiStats');
+  const tbody = document.getElementById('apiStatsItems');
+  tbody.innerHTML = '';
+  const providers = ['gemini', 'claude', 'openai', 'ollama'];
+  const labels = { gemini: 'Gemini', claude: 'Claude', openai: 'ChatGPT', ollama: 'Ollama' };
+  let total = 0;
+  for (const p of providers) {
+    const count = apiStats[p] || 0;
+    total += count;
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.className = 'whitelist-origin';
+    tdName.textContent = labels[p];
+    const tdCount = document.createElement('td');
+    tdCount.style.textAlign = 'right';
+    tdCount.textContent = count + ' 回';
+    tr.appendChild(tdName);
+    tr.appendChild(tdCount);
+    tbody.appendChild(tr);
+  }
+  // 合計行
+  const trTotal = document.createElement('tr');
+  trTotal.style.fontWeight = 'bold';
+  const tdLabel = document.createElement('td');
+  tdLabel.textContent = '合計';
+  const tdTotal = document.createElement('td');
+  tdTotal.style.textAlign = 'right';
+  tdTotal.textContent = total + ' 回';
+  trTotal.appendChild(tdLabel);
+  trTotal.appendChild(tdTotal);
+  tbody.appendChild(trTotal);
+
+  const resetDate = apiStats.lastReset
+    ? new Date(apiStats.lastReset).toLocaleDateString('ja-JP')
+    : null;
+  document.getElementById('apiStatsResetDate').textContent = resetDate
+    ? `リセット日: ${resetDate}`
+    : '';
+}
+
 const PROVIDER_CONFIG = {
   gemini: { section: 'geminiKeySection', keyId: 'geminiApiKey', pattern: /^AIza[0-9A-Za-z_-]{30,256}$/, hint: 'Gemini APIキーは "AIza" で始まる39文字程度の英数字です' },
   claude: { section: 'claudeKeySection', keyId: 'claudeApiKey', pattern: /^sk-ant-[0-9A-Za-z_-]{20,256}$/, hint: 'Claude APIキーは "sk-ant-" で始まる英数字です' },
@@ -180,6 +221,7 @@ async function pullModel() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadWhitelistUI();
+  await loadApiStats();
 
   const settings = await chrome.storage.local.get({
     apiProvider: 'gemini',
@@ -228,6 +270,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ollama: インストールボタン
   $('ollamaInstallBtn').addEventListener('click', pullModel);
+
+  // API使用回数リセット
+  $('apiStatsResetBtn').addEventListener('click', async () => {
+    await chrome.storage.local.set({ apiStats: { lastReset: Date.now() } });
+    await loadApiStats();
+    showStatus('API使用回数をリセットしました', 'ok');
+  });
 
   // 保存ボタン
   $('saveBtn').addEventListener('click', async () => {
