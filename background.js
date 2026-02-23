@@ -64,6 +64,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await loadWhitelist();
   createContextMenu();
   if (details.reason === 'install' || details.reason === 'update') {
+    // v1.5.2: 旧 host_permissions として残留した権限を解放
+    const legacyOrigins = [
+      'https://*.marvel.com/*',
+      'https://read.amazon.co.jp/*',
+      'https://read.amazon.com/*',
+      'https://*.comicbookplus.com/*',
+      'https://i.annihil.us/*',
+    ];
+    for (const origin of legacyOrigins) {
+      try { await chrome.permissions.remove({ origins: [origin] }); } catch { /* 既に存在しない場合は無視 */ }
+    }
     try {
       const syncData = await chrome.storage.sync.get(['apiKey', 'apiProvider', 'targetLang']);
       if (syncData.apiKey || syncData.apiProvider || syncData.targetLang) {
