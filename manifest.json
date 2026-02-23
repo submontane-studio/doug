@@ -5,7 +5,10 @@
   "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting",
+    "contextMenus",
+    "tabs"
   ],
   "host_permissions": [
     "https://*.marvel.com/*",
@@ -18,6 +21,7 @@
     "https://api.openai.com/*",
     "http://localhost:11434/*"
   ],
+  "optional_host_permissions": ["*://*/*"],
   "content_scripts": [
     {
       "matches": [
