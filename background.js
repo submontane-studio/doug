@@ -145,6 +145,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ============================================================
+// ホワイトリストサイトへの自動注入（次回訪問時）
+// ============================================================
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url) return;
+  try {
+    const origin = new URL(tab.url).origin;
+    if (!whitelistedOrigins.has(origin)) return;
+    await injectToTab(tabId);
+  } catch { /* 無効なURL等は無視 */ }
+});
+
+// ============================================================
 // 画像fetch
 // ============================================================
 // FETCH_IMAGE で許可する画像ホスト
