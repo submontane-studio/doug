@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Doug - Comic Book Translator",
   "version": "1.5.3",
-  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
+  "description": "Gemini・Claude・ChatGPTの画像認識AIで、コミックの吹き出しをリアルタイム翻訳。自分のAPIキーを使うので外部サーバーなし。Ollamaによるオフライン翻訳にも対応。",
   "permissions": [
     "activeTab",
     "storage",
