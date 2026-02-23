@@ -2,7 +2,6 @@
 
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日
 const CACHE_VERSION = '1.1';
-const ALLOWED_SITES_RE = /^https:\/\/([^/]*\.marvel\.com|read\.amazon\.co\.jp|read\.amazon\.com|([^/]*\.)?comicbookplus\.com)(\/|$)/;
 
 // ============================================================
 // ホワイトリスト（任意サイト対応）
@@ -22,7 +21,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 function isSiteAllowed(url) {
   if (!url) return false;
-  if (ALLOWED_SITES_RE.test(url)) return true;
   try {
     const origin = new URL(url).origin;
     return whitelistedOrigins.has(origin);
@@ -93,10 +91,11 @@ chrome.runtime.onStartup.addListener(async () => {
 // ============================================================
 // Port通信ハンドラー（TRANSLATE_IMAGE: 長時間処理のためタイムアウトなしのPortを使用）
 // ============================================================
-chrome.runtime.onConnect.addListener((port) => {
+chrome.runtime.onConnect.addListener(async (port) => {
   if (port.name !== 'translate') return;
   const sender = port.sender;
   if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
+  if (whitelistedOrigins.size === 0) await loadWhitelist();
   if (sender.tab && !isSiteAllowed(sender.tab.url)) { port.disconnect(); return; }
 
   let portDisconnected = false;
@@ -117,7 +116,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // メッセージハンドラー
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 送信元検証: 自拡張IDを確認 + タブからのメッセージは許可済みドメイン（ALLOWED_SITES_RE）のみ許可
+  // 送信元検証: 自拡張IDを確認 + タブからのメッセージはホワイトリスト登録済みドメインのみ許可
   // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
   if (sender.id !== chrome.runtime.id) {
     sendResponse({ error: '不正な送信元です' });
@@ -231,14 +230,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // FETCH_IMAGE で許可する画像ホスト
 function isAllowedImageUrl(url) {
   try {
-    const u = new URL(url);
-    return u.protocol === 'https:' && (
-      u.hostname === 'i.annihil.us' ||
-      u.hostname === 'marvel.com' ||
-      u.hostname.endsWith('.marvel.com') ||
-      u.hostname === 'comicbookplus.com' ||
-      u.hostname.endsWith('.comicbookplus.com')
-    );
+    return new URL(url).protocol === 'https:';
   } catch {
     return false;
   }

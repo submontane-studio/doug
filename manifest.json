@@ -11,30 +11,12 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://*.marvel.com/*",
-    "https://read.amazon.co.jp/*",
-    "https://read.amazon.com/*",
-    "https://*.comicbookplus.com/*",
-    "https://i.annihil.us/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.anthropic.com/*",
     "https://api.openai.com/*",
     "http://localhost:11434/*"
   ],
   "optional_host_permissions": ["*://*/*"],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://*.marvel.com/*",
-        "https://read.amazon.co.jp/*",
-        "https://read.amazon.com/*",
-        "https://*.comicbookplus.com/*"
-      ],
-      "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle"
-    }
-  ],
   "background": {
     "service_worker": "background.js"
   },
