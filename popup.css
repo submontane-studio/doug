@@ -282,3 +282,15 @@ h1 {
   color: #f44336;
   opacity: 1;
 }
+
+/* 解析結果アクションボタン */
+.analyze-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.analyze-actions .btn-secondary {
+  flex: 1;
+  padding: 7px 6px;
+  font-size: 11px;
+}
