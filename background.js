@@ -37,13 +37,16 @@ chrome.runtime.onConnect.addListener((port) => {
   if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
   if (sender.tab && !ALLOWED_SITES_RE.test(sender.tab.url || '')) { port.disconnect(); return; }
 
+  let portDisconnected = false;
+  port.onDisconnect.addListener(() => { portDisconnected = true; void chrome.runtime.lastError; });
+
   port.onMessage.addListener(async (message) => {
     if (message.type !== 'TRANSLATE_IMAGE') return;
     try {
       const result = await handleImageTranslation(message.imageData, message.imageUrl, message.imageDims);
-      port.postMessage(result);
+      if (!portDisconnected) port.postMessage(result);
     } catch (err) {
-      port.postMessage({ error: err.message });
+      if (!portDisconnected) port.postMessage({ error: err.message });
     }
   });
 });
@@ -185,8 +188,18 @@ function normalizeImageUrl(url) {
 }
 
 // Blob URL（Kindle等）はセッションのみ保存（セッション終了で自動破棄）
+// img-hash: はBlob画像のコンテンツハッシュキーで、同様にセッション限定
 function isSessionOnlyUrl(url) {
-  return typeof url === 'string' && url.startsWith('blob:');
+  return typeof url === 'string' && (url.startsWith('blob:') || url.startsWith('img-hash:'));
+}
+
+// Blob画像のコンテンツからSHA-256ハッシュを生成（BlobURLはページ遷移で変わるため内容で同一性を判定）
+async function computeImageDataHash(imageData) {
+  const base64 = imageData.indexOf(',') >= 0 ? imageData.slice(imageData.indexOf(',') + 1) : imageData;
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(base64);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return 'img-hash:' + Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function generateCacheKey(imageUrl, targetLang) {
@@ -284,9 +297,14 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
   const settings = await getSettings();
   const provider = settings.apiProvider || 'gemini';
 
+  // BlobURLはページ遷移で変わるため、imageDataのコンテンツハッシュをキャッシュキーとして使用
+  const cacheKey = (imageUrl && imageUrl.startsWith('blob:') && imageData)
+    ? await computeImageDataHash(imageData)
+    : imageUrl;
+
   // キャッシュ確認
-  if (imageUrl) {
-    const cached = await getCachedTranslation(imageUrl, settings.targetLang);
+  if (cacheKey) {
+    const cached = await getCachedTranslation(cacheKey, settings.targetLang);
     if (cached) {
       return { translations: cached, fromCache: true };
     }
@@ -324,8 +342,8 @@ async function handleImageTranslation(imageData, imageUrl, imageDims, options) {
       translations = await translateImageWithGemini(apiKey, parsed, prompt, imageDims, settings.geminiModel);
     }
 
-    if (translations.length > 0 && imageUrl) {
-      await saveCachedTranslation(imageUrl, settings.targetLang, translations);
+    if (translations.length > 0 && cacheKey) {
+      await saveCachedTranslation(cacheKey, settings.targetLang, translations);
     }
 
     return { translations };

@@ -510,22 +510,19 @@ JSON配列のみ返してください:
 
   let lastQueueKey = '';  // 前回送信したキューのキー（重複送信防止）
 
-  // セーフモード先読み用：現在の最大imgの次のBlob URL imgを探す
+  // セーフモード先読み用：viewport右外にある最も近いBlob URL imgを「次のページ」として返す
+  // Kindleはスライダー方式（前ページ=left外、現在=center、次ページ=right外）のため
+  // DOM順ではなく位置ベースで次ページを特定する
   function findNextBlobImage() {
-    const blobImgs = [...document.querySelectorAll('img')]
+    const vw = window.innerWidth;
+    const nextPageImgs = [...document.querySelectorAll('img')]
       .filter(img => img.src && img.src.startsWith('blob:') && img.complete)
-      .sort((a, b) => {
-        const pos = a.compareDocumentPosition(b);
-        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-        if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-        return 0;
-      });
-    if (blobImgs.length < 2) return null;
-    const currentEl = findLargestVisibleImage()?.element;
-    if (!currentEl) return blobImgs[1] || null;
-    const idx = blobImgs.indexOf(currentEl);
-    if (idx === -1 || idx === blobImgs.length - 1) return null;
-    return blobImgs[idx + 1];
+      .filter(img => {
+        const rect = img.getBoundingClientRect();
+        return rect.left >= vw;
+      })
+      .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    return nextPageImgs[0] || null;
   }
 
   let safeModePreloadTimer = null;
@@ -538,20 +535,22 @@ JSON配列のみ返してください:
     safeModePreloadTimer = setTimeout(async () => {
       try {
         const nextImg = findNextBlobImage();
+        console.log('[doug] safeMode prefetch: nextImg=', nextImg ? nextImg.src.substring(0, 60) : 'null');
         if (!nextImg) return;
 
         // Canvas変換してBase64取得（Blob URLはCORS制限なし）
         // captureRasterElement はエラー時にthrowするため、失敗は外側のcatchで捕捉される
         const imageData = captureRasterElement(nextImg);
+        console.log('[doug] safeMode prefetch: imageData取得完了、background.jsへ送信');
         // background.jsに送信（内部でキャッシュチェック・session保存）
         const port = chrome.runtime.connect({ name: 'translate' });
         port.postMessage({ type: 'TRANSLATE_IMAGE', imageData, imageUrl: nextImg.src });
-        port.onMessage.addListener(() => port.disconnect());
+        port.onMessage.addListener((msg) => { console.log('[doug] safeMode prefetch: 応答=', JSON.stringify(msg).substring(0, 100)); port.disconnect(); });
         port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
-      } catch {
-        // セーフモード先読みの失敗は無視
+      } catch(e) {
+        console.error('[doug] safeMode prefetch エラー:', e.message);
       }
-    }, 4200); // 4.2秒ディレイ（レート制限対応）
+    }, 2000); // 2秒ディレイ（Kindle先読み：Kindleへの追加アクセスなし、Gemini RPMも安全圏）
   }
 
   function triggerPrefetch(currentImageUrl) {
