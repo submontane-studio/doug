@@ -159,6 +159,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const imageData = await fetchImageAsDataUrl(message.url);
         sendResponse({ imageData });
       } catch (err) {
+        // CORS・権限エラーの場合は captureVisibleTab にフォールバック
+        // （画像がCDNサブドメインで配信されている場合など）
+        if (sender.tab) {
+          try {
+            const imageData = await chrome.tabs.captureVisibleTab(
+              sender.tab.windowId,
+              { format: 'jpeg', quality: 85 }
+            );
+            sendResponse({ imageData });
+            return;
+          } catch { /* captureVisibleTab も失敗した場合は元のエラーを返す */ }
+        }
         sendResponse({ error: err.message });
       }
       return;
