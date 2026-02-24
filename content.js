@@ -383,14 +383,23 @@ JSON配列のみ返してください:
     try {
       return captureRasterElement(info.element, imagePreprocess);
     } catch (err) {
-      // SecurityError (CORS) → URLフェッチにフォールバック（captureSvgImageと同パターン）
+      // SecurityError (CORS) → ビューポートキャプチャ + 要素領域クロップにフォールバック
       if (err.name !== 'SecurityError') throw err;
-      const imageUrl = info.element.src || null;
-      if (!imageUrl) throw new Error('セキュリティ制約により画像を取得できません（CORS制限）');
-      const response = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE', url: imageUrl });
+      const rect = info.element.getBoundingClientRect();
+      const response = await chrome.runtime.sendMessage({
+        type: 'CAPTURE_REGION',
+        elementRect: {
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+          dpr: window.devicePixelRatio || 1,
+        },
+      });
       if (response.error) {
-        if (response.error.includes('401') || response.error.includes('403') || response.error.includes('認証')) {
-          throw new Error('画像の認証が切れています。ページを更新（F5）してから再度お試しください。');
+        // 権限不足の場合はポップアップへの誘導メッセージを表示
+        if (response.error.includes('all_urls') || response.error.includes('activeTab')) {
+          throw new Error('スクリーンキャプチャ権限が必要です。拡張機能アイコンをクリックして「スクリーンキャプチャ権限を追加」ボタンを押してください。');
         }
         throw new Error(response.error);
       }

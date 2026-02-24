@@ -159,19 +159,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const imageData = await fetchImageAsDataUrl(message.url);
         sendResponse({ imageData });
       } catch (err) {
-        // CORS・権限エラーの場合は captureVisibleTab にフォールバック
-        // （画像がCDNサブドメインで配信されている場合など）
-        if (sender.tab) {
-          try {
-            const imageData = await chrome.tabs.captureVisibleTab(
-              sender.tab.windowId,
-              { format: 'jpeg', quality: 85 }
-            );
-            sendResponse({ imageData });
-            return;
-          } catch { /* captureVisibleTab も失敗した場合は元のエラーを返す */ }
-        }
         sendResponse({ error: err.message });
+      }
+      return;
+    }
+
+    if (message.type === 'CAPTURE_REGION') {
+      if (!sender.tab) {
+        sendResponse({ error: 'タブ情報が取得できません' });
+        return;
+      }
+      try {
+        const screenshotData = await chrome.tabs.captureVisibleTab(
+          sender.tab.windowId,
+          { format: 'jpeg', quality: 92 }
+        );
+        const imageData = message.elementRect
+          ? await cropScreenshot(screenshotData, message.elementRect)
+          : screenshotData;
+        sendResponse({ imageData });
+      } catch (err) {
+        console.warn('[doug] CAPTURE_REGION 失敗:', err.message);
+        sendResponse({ error: `スクリーンキャプチャに失敗しました: ${err.message}` });
       }
       return;
     }
@@ -310,6 +319,48 @@ async function fetchImageAsDataUrl(url) {
   const mimeMatch = rawContentType.match(/^image\/[a-zA-Z0-9.+-]{1,20}/);
   const contentType = mimeMatch ? mimeMatch[0] : 'image/jpeg';
   return `data:${contentType};base64,${base64}`;
+}
+
+// captureVisibleTab のスクリーンショットを要素領域にクロップして返す
+async function cropScreenshot(dataUrl, rect) {
+  const { x, y, width, height, dpr = 1 } = rect;
+
+  // data URL → Blob → ImageBitmap
+  const base64 = dataUrl.split(',')[1];
+  const mimeMatch = dataUrl.match(/^data:([^;]+)/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const binStr = atob(base64);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
+  const bitmap = await createImageBitmap(blob);
+
+  // CSS座標 → デバイスピクセル座標
+  const sx = Math.round(x * dpr);
+  const sy = Math.round(y * dpr);
+  const sw = Math.round(width * dpr);
+  const sh = Math.round(height * dpr);
+
+  // ビットマップ境界内に収める
+  const bx = Math.max(0, Math.min(sx, bitmap.width - 1));
+  const by = Math.max(0, Math.min(sy, bitmap.height - 1));
+  const bw = Math.max(1, Math.min(sw, bitmap.width - bx));
+  const bh = Math.max(1, Math.min(sh, bitmap.height - by));
+
+  const oc = new OffscreenCanvas(bw, bh);
+  const ctx = oc.getContext('2d');
+  ctx.drawImage(bitmap, bx, by, bw, bh, 0, 0, bw, bh);
+  bitmap.close();
+
+  const outBlob = await oc.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+  const buffer = await outBlob.arrayBuffer();
+  const outBytes = new Uint8Array(buffer);
+  const CHUNK = 8192;
+  const chunks = [];
+  for (let i = 0; i < outBytes.length; i += CHUNK) {
+    chunks.push(String.fromCharCode(...outBytes.subarray(i, i + CHUNK)));
+  }
+  return `data:image/jpeg;base64,${btoa(chunks.join(''))}`;
 }
 
 // ============================================================

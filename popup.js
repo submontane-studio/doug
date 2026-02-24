@@ -23,6 +23,12 @@ async function initCurrentSite() {
     btn.className = isWhitelisted ? 'btn-secondary' : 'btn-primary';
     btn.style.display = '';
     $('currentSiteSection').style.display = '';
+
+    // 登録済みサイトでスクリーンキャプチャ権限が未付与の場合はボタンを表示
+    if (isWhitelisted) {
+      const hasCaptureAccess = await chrome.permissions.contains({ origins: ['*://*/*'] });
+      $('capturePermSection').style.display = hasCaptureAccess ? 'none' : '';
+    }
   } catch { /* 無効なURLは無視 */ }
 }
 
@@ -61,6 +67,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!granted) {
       showStatus('権限が拒否されました', 'err');
       return;
+    }
+
+    // captureVisibleTab のために <all_urls> 権限も取得（CDN画像対応）
+    const hasCaptureAccess = await chrome.permissions.contains({ origins: ['*://*/*'] });
+    if (!hasCaptureAccess) {
+      await chrome.permissions.request({ origins: ['*://*/*'] }).catch(() => {});
     }
 
     // 解析中表示
@@ -114,6 +126,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.permissions.remove({ origins: [currentOrigin + '/*'] });
     } catch { /* 無視 */ }
     showStatus('キャンセルしました', 'ok');
+  });
+
+  // 既登録サイトのスクリーンキャプチャ権限を追加
+  $('grantCapturePermBtn').addEventListener('click', async () => {
+    try {
+      const granted = await chrome.permissions.request({ origins: ['*://*/*'] });
+      if (granted) {
+        $('capturePermSection').style.display = 'none';
+        showStatus('権限を追加しました。翻訳を再試行してください。', 'ok');
+      } else {
+        showStatus('権限が拒否されました', 'err');
+      }
+    } catch (err) {
+      showStatus('権限の取得に失敗: ' + err.message, 'err');
+    }
   });
 
   // 翻訳先言語：変更時に即保存
