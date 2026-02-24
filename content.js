@@ -830,7 +830,7 @@ JSON配列のみ返してください:
     // 再翻訳ボタン（右下にホバーで表示）
     const reloadBtn = document.createElement('button');
     reloadBtn.className = 'mut-reload-btn';
-    reloadBtn.title = '再翻訳（キャッシュをスキップ）';
+    reloadBtn.title = 'ページを再翻訳';
     reloadBtn.insertAdjacentHTML('afterbegin',
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
       '<path d="M23 4v6h-6"/>' +
@@ -1037,6 +1037,9 @@ JSON配列のみ返してください:
     if (!btn) return;
     btn.classList.toggle('mut-btn-active', autoTranslate);
     btn.title = autoTranslate ? '自動翻訳: ON（クリックでOFF）' : '自動翻訳: OFF（クリックでON）';
+    if (autoTranslate && !overlayContainer && !isTranslating) {
+      scheduleAutoTranslate();
+    }
   }
 
   function scheduleAutoTranslate() {
