@@ -1,6 +1,17 @@
 {
   "name": "doug",
-  "version": "1.3.0",
+  "version": "1.5.3",
   "private": true,
-  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です"
+  "description": "Dougはコミックをリアルタイムで翻訳表示する拡張機能です",
+  "type": "module",
+  "scripts": {
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "@playwright/test": "^1.48.0"
+  }
 }
