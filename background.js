@@ -1,3 +1,6 @@
+import { normalizeImageUrl, isSessionOnlyUrl, isAllowedImageUrl, isSiteAllowed as _isSiteAllowedPure } from './utils/url-utils.js';
+import { cleanTranslatedText, parseVisionResponse } from './utils/parse-utils.js';
+
 // background.js - Gemini API テキスト翻訳 + キャッシュ管理
 
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30日
@@ -18,14 +21,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     whitelistedOrigins = new Set(changes.whitelist.newValue || []);
   }
 });
-
-function isSiteAllowed(url) {
-  if (!url) return false;
-  try {
-    const origin = new URL(url).origin;
-    return whitelistedOrigins.has(origin);
-  } catch { return false; }
-}
 
 async function injectToTab(tabId) {
   try {
@@ -104,7 +99,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
   const sender = port.sender;
   if (sender.id !== chrome.runtime.id) { port.disconnect(); return; }
   if (whitelistedOrigins.size === 0) await loadWhitelist();
-  if (sender.tab && !isSiteAllowed(sender.tab.url)) { port.disconnect(); return; }
+  if (sender.tab && !_isSiteAllowedPure(sender.tab.url, whitelistedOrigins)) { port.disconnect(); return; }
 
   let portDisconnected = false;
   port.onDisconnect.addListener(() => { portDisconnected = true; void chrome.runtime.lastError; });
@@ -140,7 +135,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (whitelistedOrigins.size === 0) await loadWhitelist();
     // タブからのメッセージはホワイトリスト登録済みドメインのみ許可
     // sender.tabがない場合 = popup等の拡張内ページ（自拡張IDチェックで十分）
-    if (sender.tab && !isSiteAllowed(sender.tab.url)) {
+    if (sender.tab && !_isSiteAllowedPure(sender.tab.url, whitelistedOrigins)) {
       sendResponse({ error: '不正な送信元です' });
       return;
     }
@@ -283,15 +278,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // ============================================================
 // 画像fetch
 // ============================================================
-// FETCH_IMAGE で許可する画像ホスト
-function isAllowedImageUrl(url) {
-  try {
-    return new URL(url).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 async function fetchImageAsDataUrl(url) {
   let res;
   try {
@@ -401,25 +387,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ============================================================
 // キャッシュ機能
 // ============================================================
-// URLからクエリパラメータ・fragment・認証情報を除去（トークン等の変動部分を無視してキャッシュ一致させる）
-function normalizeImageUrl(url) {
-  if (!url) return '';
-  try {
-    const u = new URL(url);
-    return u.origin + u.pathname;
-  } catch {
-    // 認証情報(@以前)を除去してからクエリ・fragmentを除去
-    const stripped = url.replace(/^[^:]+:\/\/[^@]*@/, '');
-    return stripped.split('?')[0].split('#')[0];
-  }
-}
-
-// Blob URL（Kindle等）はセッションのみ保存（セッション終了で自動破棄）
-// img-hash: はBlob画像のコンテンツハッシュキーで、同様にセッション限定
-function isSessionOnlyUrl(url) {
-  return typeof url === 'string' && (url.startsWith('blob:') || url.startsWith('img-hash:'));
-}
-
 // Blob画像のコンテンツからSHA-256ハッシュを生成（BlobURLはページ遷移で変わるため内容で同一性を判定）
 async function computeImageDataHash(imageData) {
   const base64 = imageData.indexOf(',') >= 0 ? imageData.slice(imageData.indexOf(',') + 1) : imageData;
@@ -1004,19 +971,6 @@ async function analyzeScreenshot(tabId) {
   return { isComic: /yes/i.test(answer) };
 }
 
-// 翻訳テキストから「」と末尾の。を除去
-function cleanTranslatedText(text) {
-  if (!text) return text;
-  let s = text;
-  // 文頭の「と文末の」を除去
-  if (s.startsWith('「') && s.endsWith('」')) {
-    s = s.slice(1, -1);
-  }
-  // 末尾の。を除去
-  s = s.replace(/。$/, '');
-  return s;
-}
-
 // ============================================================
 // 先読み翻訳（キュー制御）
 // ============================================================
@@ -1159,104 +1113,3 @@ function getImageDimsFromDataUrl(dataUrl) {
   return { width: 1024, height: 1536 };
 }
 
-function parseVisionResponse(geminiResponse, imageDims) {
-  let cleaned = geminiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return [];
-
-  const imgW = imageDims?.width || 1000;
-  const imgH = imageDims?.height || 1500;
-
-  // LLM出力のJSON修復:
-  // 1. 制御文字を空白に正規化（生改行・タブ等）
-  // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
-  // catchブロックで診断ログに使うためtryブロック外で宣言
-  const sanitized = jsonMatch[0]
-    // 0. LLMが追加する行コメントを削除（:// のURLは除外）
-    .replace(/(?<!:)\/\/.*$/gm, '')
-    // 1. 制御文字を空白に正規化（生改行・タブ等）
-    .replace(/[\x00-\x1F\x7F]+/g, ' ')
-    // 2. 不正なエスケープシーケンスを修復（\p, \a 等 → \\p, \\a）
-    .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\')
-    // 3. 末尾カンマを削除（LLMが最後の要素の後にカンマを付ける場合）
-    .replace(/,(\s*[}\]])/g, '$1')
-    // 4. } や ] の後にカンマなしで次のプロパティ/要素が続く場合のカンマ補完
-    //    \s* でスペースなしの隣接ケース（]"key" 等）にも対応
-    .replace(/([}\]])\s*(["{[])/g, '$1,$2');
-
-  // 途中切れ修復: 複数の候補を順に試みる
-  const candidates = [sanitized, sanitized + '}]', sanitized + '"}]'];
-  const lastObj = sanitized.lastIndexOf('},');
-  if (lastObj > 0) candidates.push(sanitized.substring(0, lastObj + 1) + ']');
-
-  let results = null;
-  let parseErr = null;
-  for (const candidate of candidates) {
-    try { results = JSON.parse(candidate); break; } catch (e) { parseErr = parseErr ?? e; }
-  }
-
-  if (!Array.isArray(results)) {
-    console.error('[Doug bg] Vision応答のパースに失敗:', parseErr);
-    const pos = parseInt(parseErr?.message?.match(/position (\d+)/)?.[1] || '0', 10);
-    if (pos > 0) {
-      console.error('[Doug bg] 問題箇所 (前100文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 100), pos)));
-      console.error('[Doug bg] 問題箇所 (後100文字):', JSON.stringify(sanitized.substring(pos, pos + 100)));
-    }
-    return [];
-  }
-
-  try {
-    return results
-      .filter(r => r.translated && (r.box || r.bbox))
-      .map(r => {
-        let top, left, width, height;
-
-        if (r.box && Array.isArray(r.box) && r.box.length === 4) {
-          // 正規化座標 [y_min, x_min, y_max, x_max] (0-1000) → パーセンテージ
-          const [yMin, xMin, yMax, xMax] = r.box;
-          top = (yMin / 1000) * 100;
-          left = (xMin / 1000) * 100;
-          width = ((xMax - xMin) / 1000) * 100;
-          height = ((yMax - yMin) / 1000) * 100;
-        } else if (r.bbox) {
-          // フォールバック: ピクセル座標
-          const bx = r.bbox.x ?? r.bbox.left ?? 0;
-          const by = r.bbox.y ?? r.bbox.top ?? 0;
-          const bw = r.bbox.w ?? r.bbox.width ?? 100;
-          const bh = r.bbox.h ?? r.bbox.height ?? 50;
-          top = (by / imgH) * 100;
-          left = (bx / imgW) * 100;
-          width = (bw / imgW) * 100;
-          height = (bh / imgH) * 100;
-        }
-
-        const result = {
-          bbox: { top, left, width, height },
-          original: r.original || '',
-          translated: cleanTranslatedText(r.translated),
-          type: r.type || 'speech',
-        };
-        if (r.background) {
-          if (typeof r.background === 'string') {
-            result.background = r.background;
-          } else if (r.background.top && r.background.bottom) {
-            // グラデーション: APIは色順を逆に返す傾向があるため反転して適用
-            result.background = `linear-gradient(to bottom, ${r.background.bottom}, ${r.background.top})`;
-          }
-        }
-        if (r.border) {
-          result.border = r.border;
-        }
-        return result;
-      });
-  } catch (err) {
-    console.error('[Doug bg] Vision応答のパースに失敗:', err);
-    // 失敗箇所を特定するための診断ログ
-    const pos = parseInt(err.message?.match(/position (\d+)/)?.[1] || '0', 10);
-    if (pos > 0) {
-      console.error('[Doug bg] 問題箇所 (前100文字):', JSON.stringify(sanitized.substring(Math.max(0, pos - 100), pos)));
-      console.error('[Doug bg] 問題箇所 (後100文字):', JSON.stringify(sanitized.substring(pos, pos + 100)));
-    }
-    return [];
-  }
-}
