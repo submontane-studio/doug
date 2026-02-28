@@ -31,12 +31,19 @@ export function parseVisionResponse(geminiResponse, imageDims) {
   const imgW = imageDims?.width || 1000;
   const imgH = imageDims?.height || 1500;
 
-  const sanitized = jsonMatch[0]
-    .replace(/(?<!:)\/\/.*$/gm, '')
-    .replace(/[\x00-\x1F\x7F]+/g, ' ')
-    .replace(/\\(?!["\\\/bfnrtu])/g, '\\\\')
-    .replace(/,(\s*[}\]])/g, '$1')
-    .replace(/([}\]])\s*(["{[])/g, '$1,$2');
+  function removeLineComments(s)           { return s.replace(/(?<!:)\/\/.*$/gm, ''); }
+  function removeControlChars(s)           { return s.replace(/[\x00-\x1F\x7F]+/g, ' '); }
+  function escapeLooseBackslashes(s)       { return s.replace(/\\(?!["\\\/bfnrtu])/g, '\\\\'); }
+  function removeTrailingCommas(s)         { return s.replace(/,(\s*[}\]])/g, '$1'); }
+  function addMissingCommasBetweenItems(s) { return s.replace(/([}\]])\s*(["{[])/g, '$1,$2'); }
+
+  const sanitized = [
+    removeLineComments,
+    removeControlChars,
+    escapeLooseBackslashes,
+    removeTrailingCommas,
+    addMissingCommasBetweenItems,
+  ].reduce((s, fn) => fn(s), jsonMatch[0]);
 
   const candidates = [sanitized, sanitized + '}]', sanitized + '"}]'];
   const lastObj = sanitized.lastIndexOf('},');
